@@ -63,4 +63,15 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const kcov_unit = b.addSystemCommand(&.{ "kcov", "--include-path=src" });
+    kcov_unit.addDirectoryArg(b.path("coverage"));
+    kcov_unit.addArtifactArg(exe_unit_tests);
+
+    const coverage_step = b.step("coverage", "Generate test coverage (kcov)");
+    coverage_step.dependOn(&kcov_unit.step);
+
+    const clean_step = b.step("clean", "Clean up project directory");
+    clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot("zig-out")).step);
+    clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
 }
