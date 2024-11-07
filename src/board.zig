@@ -2,9 +2,10 @@ const std = @import("std");
 const Coordinates = @import("coordinates.zig").Coordinates(u32);
 
 /// # Enumeration representing a map cell.
-pub const Cell = enum(u1) {
+pub const Cell = enum(u2) {
     empty,
-    full
+    player1,
+    player2
 };
 
 /// # Structure containing the board of the gomoku.
@@ -89,8 +90,9 @@ pub const Board = struct {
     ///     - self: The board on which you want to set the cell.
     ///     - x: The coordinate on x-axis.
     ///     - y: The coordinate on y-axis.
-    pub fn setCellByCoordinates(self: *Board, x: u32, y: u32) !void {
-        self.map[coordinatesToIndex(self.*, x, y)] = Cell.full;
+    pub fn setCellByCoordinates(self: *Board, x: u32, y: u32,
+    value: Cell) !void {
+        self.map[coordinatesToIndex(self.*, x, y)] = value;
         try self.move_history.append(Coordinates{
             .x = x,
             .y = y,
@@ -121,12 +123,12 @@ test "expect board to have a full cell on x: 2 and y: 0" {
     defer board.deinit(std.testing.allocator);
 
     // Set coordinates.
-    board.setCellByCoordinates(x, y) catch |err| { return err; };
+    board.setCellByCoordinates(x, y, Cell.player1) catch |err| { return err; };
 
     // Verifying the board.
     try std.testing.expect(board.height == height);
     try std.testing.expect(board.width == width);
-    try std.testing.expect(board.getCellByCoordinates(x, y) == Cell.full);
+    try std.testing.expect(board.getCellByCoordinates(x, y) == Cell.player1);
     try std.testing.expect(board.getCellByCoordinates(x + 1, y) == Cell.empty);
     try std.testing.expect(
         board.isCoordinatesOutside(width, height - 1) == true
