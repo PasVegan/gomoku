@@ -13,10 +13,19 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
           version: 0.13.0
+      - name: Install kcov
+        run: |
+          sudo apt-get install -y kcov
       - name: Build
         run: zig build
       - name: Test
-        run: zig build test
+        run: zig build coverage --summary all
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ./coverage/
+          fail_ci_if_error: true
 
   mirror_repository:
     runs-on: ubuntu-latest

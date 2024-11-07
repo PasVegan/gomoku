@@ -1,4 +1,5 @@
 const std = @import("std");
+const board = @import("board.zig");
 const Allocator = std.mem.Allocator;
 
 const stdout = std.io.getStdOut().writer();
@@ -130,4 +131,10 @@ pub fn main() !void {
             break;
         try handleCommand(&read_buffer.buffer);
     }
+}
+
+// This is a test that will run all the tests in all the other files in the project.
+test {
+    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(board);
 }
