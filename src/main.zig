@@ -123,7 +123,8 @@ pub fn main() !void {
     while (!should_stop) {
         stdin.streamUntilDelimiter(read_buffer.writer(), '\n', 256)
         catch |err| {
-            std.debug.print("Error during the stream capture: {}\n", .{err});
+            send_log_f(.ERROR, "Error during the stream capture: {}\n",
+                .{err});
             break;
         };
         // EOF handling
