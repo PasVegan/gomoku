@@ -1,8 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const allocator = std.heap.c_allocator;
-
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 
@@ -40,8 +38,8 @@ const LogType = enum {
 
 /// # Function used to send a format logging message message.
 fn send_log_f(comptime log_type: LogType, comptime fmt: []const u8, args: anytype) (WriteError || Allocator.Error)!void {
-    const out = try std.fmt.allocPrint(allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
-    defer allocator.free(out);
+    const out = try std.fmt.allocPrint(std.heap.page_allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
+    defer std.heap.page_allocator.free(out);
     return send_message_raw(out);
 }
 
@@ -54,8 +52,8 @@ fn send_log_c(comptime log_type: LogType, comptime msg: []const u8) WriteError!v
 /// - Behavior:
 ///     - Sending basic informations about the bot.
 fn handle_about(_: []const u8) WriteError!void {
-    const bot_name = "zig_template";
-    const about_answer = "name=\"" ++ bot_name ++ "\", version=\"0.42\"";
+    const bot_name = "TNBC";
+    const about_answer = "name=\"" ++ bot_name ++ "\", version=\"0.1\"";
 
     return send_message_comptime(about_answer);
 }
@@ -106,7 +104,7 @@ const command_mappings: []const CommandMapping = &[_]CommandMapping{
     .{ .cmd = "BOARD", .func = handle_board },
 };
 
-/// # Function used to handle comments.
+/// # Function used to handle commands.
 /// - Parameters:
 ///     - cmd: A command to executes.
 fn handle_command(cmd: []const u8) !void {
@@ -123,7 +121,7 @@ pub fn main() !void {
     while (!should_stop) {
         stdin.streamUntilDelimiter(read_buffer.writer(), '\n', 256)
         catch |err| {
-            send_log_f(.ERROR, "Error during the stream capture: {}\n",
+            try send_log_f(.ERROR, "Error during the stream capture: {}\n",
                 .{err});
             break;
         };
