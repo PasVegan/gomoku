@@ -2,7 +2,7 @@ const std = @import("std");
 const Coordinates = @import("coordinates.zig").Coordinates(u32);
 
 /// # Enumeration representing a map cell.
-pub const Cell = enum(u2) {
+pub const Cell = enum {
     empty,
     player1,
     player2
