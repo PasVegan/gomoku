@@ -49,8 +49,8 @@ const LogType = enum {
 
 /// Function used to send a format logging message message.
 fn sendLogF(comptime log_type: LogType, comptime fmt: []const u8, args: anytype) (WriteError || AllocationError)!void {
-    const out = try std.fmt.allocPrint(std.heap.page_allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
-    defer std.heap.page_allocator.free(out);
+    const out = try std.fmt.allocPrint(allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
+    defer allocator.free(out);
     return sendMessageRaw(out);
 }
 
@@ -146,6 +146,20 @@ fn handleCommand(cmd: []const u8) !void {
     return sendLogC(.UNKNOWN, "command is not implemented");
 }
 
+fn readLineIntoBuffer(input_reader: std.io.AnyReader, read_buffer: *std.BoundedArray(u8, 256)) !void {
+    read_buffer.len = 0;
+    input_reader.streamUntilDelimiter(read_buffer.writer(), '\n', 256) catch |err| {
+        try sendLogF(.ERROR, "error during the stream capture: {}\n", .{err});
+        return;
+    };
+    // EOF handling
+    if (read_buffer.len == 0)
+        return;
+    if (read_buffer.buffer[read_buffer.len - 1] == '\r') { // remove the \r if there is one
+        read_buffer.len -= 1;
+    }
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -155,19 +169,8 @@ pub fn main() !void {
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
     while (!should_stop) {
-        stdin.streamUntilDelimiter(read_buffer.writer(), '\n', 256) catch |err| {
-            try sendLogF(.ERROR, "error during the stream capture: {}\n", .{err});
-            break;
-        };
-        // EOF handling
-        if (read_buffer.len == 0)
-            break;
-        if (read_buffer.buffer[read_buffer.len - 1] == '\r') { // remove the \r if there is one
-            read_buffer.len -= 1;
-        }
+        try readLineIntoBuffer(stdin.any(), &read_buffer);
         try handleCommand(read_buffer.slice());
-        // Reset the buffer
-        read_buffer.len = 0;
     }
 }
 
