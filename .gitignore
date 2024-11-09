@@ -4,3 +4,4 @@
 .idea
 
 /coverage/
+/zig-out/bin/pbrain-gomoku-ai
