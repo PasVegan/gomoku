@@ -1,17 +1,25 @@
 const std = @import("std");
 const board = @import("board.zig");
-const Allocator = std.mem.Allocator;
 
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 
 const WriteError = std.posix.WriteError;
 const ReadError = std.posix.ReadError;
+const AllocationError = std.mem.Allocator.Error;
 
-const Error = Allocator.Error || WriteError || ReadError;
+const Error = AllocationError || WriteError || ReadError;
 
-/// Variable containing if the bot shhould stop.
+/// Application memory allocator (arena).
+var allocator: std.mem.Allocator = undefined;
+
+/// Variable containing if the bot should stop.
 var should_stop = false;
+
+/// Variable for the game board.
+var width: u32 = 0;
+var height: u32 = 0;
+var game_board: board.Board = undefined;
 
 /// # Function used to send a message.
 fn sendMessage(msg: []const u8) WriteError!void {
@@ -38,7 +46,7 @@ const LogType = enum {
 };
 
 /// # Function used to send a format logging message message.
-fn sendLogF(comptime log_type: LogType, comptime fmt: []const u8, args: anytype) (WriteError || Allocator.Error)!void {
+fn sendLogF(comptime log_type: LogType, comptime fmt: []const u8, args: anytype) (WriteError || AllocationError)!void {
     const out = try std.fmt.allocPrint(std.heap.page_allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
     defer std.heap.page_allocator.free(out);
     return sendMessageRaw(out);
@@ -118,12 +126,16 @@ fn handleCommand(cmd: []const u8) !void {
 }
 
 pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    allocator = arena.allocator();
+
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
+
     while (!should_stop) {
-        stdin.streamUntilDelimiter(read_buffer.writer(), '\n', 256)
-        catch |err| {
-            try sendLogF(.ERROR, "error during the stream capture: {}\n",
-                .{err});
+        stdin.streamUntilDelimiter(read_buffer.writer(), '\n', 256) catch |err| {
+            try sendLogF(.ERROR, "error during the stream capture: {}\n", .{err});
             break;
         };
         // EOF handling
