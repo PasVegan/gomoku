@@ -217,6 +217,28 @@ test "handleStart command invalid number" {
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR error during the parsing of the size: error.InvalidCharacter\n"));
 }
 
+test "handleInfo command invalid input" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleInfo("INFO", list.writer().any());
+    try std.testing.expect(
+        std.mem.eql(u8, list.items, "")
+    );
+}
+
+test "handleInfo command valid input" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleInfo("INFO timeout_turn 5000", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, ""));
+}
+
 test "handleEnd command" {
     should_stop = false;
     try handleEnd("", undefined);
