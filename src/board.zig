@@ -36,8 +36,7 @@ pub const Board = struct {
         history_allocator: std.mem.Allocator,
         height: u32, width: u32
     ) !Board {
-        const map = map_allocator.alloc(Cell, height * width)
-            catch |err| { return err; };
+        const map = try map_allocator.alloc(Cell, height * width);
         // Initialize the map to zero bytes.
         @memset(map, Cell.empty);
         const move_history = std.ArrayList(Coordinates).init
