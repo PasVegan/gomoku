@@ -7,6 +7,9 @@ const test_allocator = std.testing.allocator;
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 
+var prng = std.rand.DefaultPrng.init(0);
+const random = prng.random();
+
 /// Application memory allocator (arena).
 var allocator: std.mem.Allocator = undefined;
 
@@ -31,7 +34,7 @@ fn handleAbout(_: []const u8, writer: std.io.AnyWriter) !void {
 /// Function representing the start command, allocate the board.
 fn handleStart(msg: []const u8, writer: std.io.AnyWriter) !void {
     if (msg.len < 7 or msg[5] != ' ') { // at least "START " + 1 digit
-        try message.sendLogC(.ERROR, "wrong start command format", writer);
+        try message.sendLogC(.ERROR, "wrong START command format", writer);
         return;
     }
     const size = std.fmt.parseUnsigned(u32, msg[6..], 10) catch |err| {
@@ -69,9 +72,43 @@ fn handleBegin(_: []const u8, _: std.io.AnyWriter) !void {
     // Handle begin
 }
 
-fn handleTurn(msg: []const u8, _: std.io.AnyWriter) !void {
-    // Handle turn
-    _ = msg;
+fn handleTurn(msg: []const u8, writer: std.io.AnyWriter) !void {
+    if (msg.len < 8 or msg[4] != ' ') { // at least "TURN 5,5" for example
+        try message.sendLogC(.ERROR, "wrong TURN command format", writer);
+        return;
+    }
+    const comma_pos = std.mem.indexOf(u8, msg, ",");
+    if (comma_pos == null) {
+        try message.sendLogC(.ERROR, "wrong TURN command format1", writer);
+        return;
+    }
+    const x = std.fmt.parseUnsigned(u32, msg[5..comma_pos.?], 10) catch |err| {
+        try message.sendLogF(.ERROR, "error during the parsing of the x coordinate: {}, val:{s}",
+            .{err, msg[5..comma_pos.?]}, writer);
+        return;
+    };
+    const y = std.fmt.parseUnsigned(u32, msg[comma_pos.? + 1..], 10) catch |err| {
+        try message.sendLogF(.ERROR, "error during the parsing of the y coordinate: {}, val:{s}",
+            .{err, msg[comma_pos.? + 1..]}, writer);
+        return;
+    };
+    if (game_board.isCoordinatesOutside(x, y)) {
+        try message.sendLogC(.ERROR, "coordinates are outside the board", writer);
+        return;
+    }
+    if (game_board.getCellByCoordinates(x, y) != board.Cell.empty) {
+        try message.sendLogC(.ERROR, "cell is not empty", writer);
+        return;
+    }
+    try game_board.setCellByCoordinates(x, y, board.Cell.player2);
+
+    const empty_cell = board.findRandomValidCell(game_board, random) catch |err| {
+        try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
+        return;
+    };
+    try game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.player1);
+
+    try message.sendMessage(try std.fmt.allocPrint(allocator, "{d},{d}", .{empty_cell.x, empty_cell.y}), writer);
 }
 
 fn handleBoard(_: []const u8, _: std.io.AnyWriter) !void {
@@ -184,7 +221,7 @@ test "handleStart command invalid input" {
     message.init(allocator);
 
     try handleStart("START", list.writer().any());
-    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong start command format\n"));
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong START command format\n"));
 }
 
 test "handleStart command too large size" {
@@ -253,6 +290,138 @@ test "handleCommand unknown command" {
 
     try handleCommand("UNKNOWN", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "UNKNOWN command is not implemented\n"));
+}
+
+test "handleTurn command valid input" {
+    allocator = std.heap.page_allocator; // testing allocator detect leak but can't find it wtf ???
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    width = 20; height = 20;
+    game_board = try board.Board.init(allocator, allocator, 20, 20);
+    defer game_board.deinit(allocator);
+
+    try handleTurn("TURN 5,5", list.writer().any());
+    // Check if we received the coordinates
+    const comma_pos = std.mem.indexOf(u8, list.items, ",");
+    try std.testing.expect(comma_pos != null);
+    try std.testing.expect(@TypeOf(try std.fmt.parseUnsigned(u32, list.items[0..comma_pos.?], 10)) == u32);
+    try std.testing.expect(@TypeOf(try std.fmt.parseUnsigned(u32, list.items[comma_pos.? + 1..list.items.len - 1], 10)) == u32);
+    try std.testing.expect(game_board.getCellByCoordinates(5, 5) == board.Cell.player2);
+}
+
+test "handleTurn command invalid format - too short" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleTurn("TURN", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong TURN command format\n"));
+}
+
+test "handleTurn command invalid format - no space" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleTurn("TURN5,5", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong TURN command format\n"));
+}
+
+test "handleTurn command missing comma" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleTurn("TURN 555", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong TURN command format1\n"));
+}
+
+test "handleTurn command invalid x coordinate" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleTurn("TURN a,5", list.writer().any());
+    try std.testing.expect(std.mem.startsWith(u8, list.items, "ERROR error during the parsing of the x coordinate"));
+}
+
+test "handleTurn command invalid y coordinate" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    try handleTurn("TURN 5,b", list.writer().any());
+    try std.testing.expect(std.mem.startsWith(u8, list.items, "ERROR error during the parsing of the y coordinate"));
+}
+
+test "handleTurn command coordinates out of bounds" {
+    allocator = std.heap.page_allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    width = 20; height = 20;
+    game_board = try board.Board.init(allocator, allocator, 20, 20);
+    defer game_board.deinit(allocator);
+
+    try handleTurn("TURN 25,25", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR coordinates are outside the board\n"));
+}
+
+test "handleTurn command cell already taken" {
+    allocator = std.heap.page_allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    width = 20; height = 20;
+    game_board = try board.Board.init(allocator, allocator, 20, 20);
+    defer game_board.deinit(allocator);
+
+    // First place a piece
+    try handleTurn("TURN 5,5", list.writer().any());
+    list.clearRetainingCapacity();
+
+    // Try to place another piece in the same spot
+    try handleTurn("TURN 5,5", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR cell is not empty\n"));
+}
+
+test "handleTurn command no empty cells" {
+    allocator = std.heap.page_allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(allocator);
+
+    width = 5; height = 5;
+    game_board = try board.Board.init(allocator, allocator, 5, 5);
+    defer game_board.deinit(allocator);
+
+    // Fill the board
+    var x: u32 = 0;
+    var y: u32 = 0;
+    outer: while (y < height) {
+        while (x < width) {
+            try game_board.setCellByCoordinates(x, y, board.Cell.player1);
+            x += 1;
+            if (y == height - 1 and x == width - 1) {
+                break :outer;
+            }
+        }
+        x = 0;
+        y += 1;
+    }
+
+    // Fill the last cell
+    try handleTurn("TURN 4,4", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR error during the search of a random cell: error.NoEmptyCells\n"));
 }
 
 const TestReader = struct {
