@@ -102,6 +102,12 @@ pub const GameSettings = struct {
     /// cannot store permanent files.
     folder: []u8,
     started: bool,
+    allocator: Allocator,
+
+    /// Method to call to deinitialize the struct.
+    pub fn deinit(self: *GameSettings) void {
+        self.allocator.free(self.folder);
+    }
 
     /// Method used to parse and set timeout_turn parameter from message.
     fn handleTimeoutTurn(self: *GameSettings, msg: []const u8, writer: std.io.AnyWriter) void {
@@ -174,45 +180,13 @@ pub const GameSettings = struct {
     /// Method used to parse and set folder parameter from message.
     fn handleFolder(self: *GameSettings, msg: []const u8, writer: std.io.AnyWriter) void {
         _ = writer;
-        const allocator = std.heap.page_allocator;
         if (self.folder.len > 0) {
-            allocator.free(self.folder);
+            self.allocator.free(self.folder);
         }
-        self.folder = allocator.dupe(u8, msg) catch {
+        self.folder = self.allocator.dupe(u8, msg) catch {
             self.folder = "";
             return;
         };
-    }
-
-    /// Method used to evaluate a position.
-    /// - Returns:
-    ///     A value in a range of 0 to 1.
-    ///     - 0: Representing a non-win position.
-    ///     - 1: Representing a win position.
-    fn handleEvaluate(self: *GameSettings, msg: []const u8, writer: std.io.AnyWriter) void {
-        _ = self;
-
-        // Parse coordinates.
-        var iterator = std.mem.split(u8, msg, ",");
-        const first: i32 = std.fmt.parseInt(i32, iterator.next() orelse
-            return, 10) catch -1;
-        const second: i32 = std.fmt.parseInt(i32, iterator.next() orelse
-            return, 10) catch -1;
-
-        // On failure.
-        if (first == -1 or second == -1) {
-            message.sendLogF(
-                message.LogType.DEBUG,
-                "invalid coordinates x:{} y:{}",
-                .{first, second},
-                writer
-            ) catch {
-                return;
-            };
-            return;
-        }
-
-        // Todo: Continue the implementation. Must send back the evaluation.
     }
 };
 
@@ -233,7 +207,6 @@ const infoCommandMappings: []const InfoCommandMapping = &[_]InfoCommandMapping{
     .{ .cmd = "time_left", .func = GameSettings.handleTimeLeft },
     .{ .cmd = "game_type", .func = GameSettings.handleGameType },
     .{ .cmd = "rule", .func = GameSettings.handleRule },
-    .{ .cmd = "evaluate", .func = GameSettings.handleEvaluate },
     .{ .cmd = "folder", .func = GameSettings.handleFolder },
 };
 
@@ -271,7 +244,22 @@ pub var gameSettings = GameSettings{
     .rule = GameRule{ .rule = 0 },
     .folder = "", // or allocate if you need to modify it later.
     .started = false,
+    .allocator = std.heap.page_allocator,
 };
+
+test "GameType.isValid" {
+    const testing = std.testing;
+
+    // Test valid values
+    try testing.expect(GameType.isValid(0));
+    try testing.expect(GameType.isValid(1));
+    try testing.expect(GameType.isValid(2));
+    try testing.expect(GameType.isValid(3));
+
+    // Test invalid values
+    try testing.expect(!GameType.isValid(4));
+    try testing.expect(!GameType.isValid(255));
+}
 
 test "GameRule" {
     const testing = std.testing;
@@ -311,6 +299,7 @@ test "GameSettings basic initialization" {
         .rule = GameRule{ .rule = 0 },
         .folder = "",
         .started = false,
+        .allocator = std.heap.page_allocator,
     };
 
     try testing.expectEqual(@as(u64, 0), settings.timeout_turn);
@@ -338,7 +327,9 @@ test "GameSettings handle timeout commands" {
         .rule = GameRule{ .rule = 0 },
         .folder = "",
         .started = false,
+        .allocator = std.heap.page_allocator,
     };
+    defer settings.deinit();
 
     // Test valid timeout_turn
     settings.handleTimeoutTurn("5000", stdout.any());
@@ -370,7 +361,9 @@ test "GameSettings handle memory and time commands" {
         .rule = GameRule{ .rule = 0 },
         .folder = "",
         .started = false,
+        .allocator = std.heap.page_allocator,
     };
+    defer settings.deinit();
 
     // Test max_memory
     settings.handleMaxMemory("1048576", stdout.any());
@@ -403,7 +396,9 @@ test "GameSettings handle game type and rule" {
         .rule = GameRule{ .rule = 0 },
         .folder = "",
         .started = false,
+        .allocator = std.heap.page_allocator,
     };
+    defer settings.deinit();
 
     // Test game_type
     settings.handleGameType("1", stdout.any());
@@ -415,6 +410,64 @@ test "GameSettings handle game type and rule" {
     try testing.expect(settings.rule.isContinuous());
     try testing.expect(settings.rule.isRenju());
     try testing.expect(!settings.rule.isCaro());
+}
+
+test "GameSettings invalid game type" {
+    const testing = std.testing;
+    var settings = GameSettings{
+        .timeout_turn = 0,
+        .turn_time = 0,
+        .current_time = 0,
+        .timeout_match = 0,
+        .max_memory = 0,
+        .time_left = 2147483647,
+        .game_type = .opponent_is_human,
+        .rule = GameRule{ .rule = 0 },
+        .folder = "",
+        .started = false,
+        .allocator = std.heap.page_allocator,
+    };
+    defer settings.deinit();
+
+    // Test invalid game type
+    const original_type = settings.game_type;
+    settings.handleGameType("4", stdout.any());
+    try testing.expectEqual(original_type, settings.game_type);
+
+    // Test invalid format
+    settings.handleGameType("invalid", stdout.any());
+    try testing.expectEqual(original_type, settings.game_type);
+}
+
+test "GameSettings invalid rule combinations" {
+    const testing = std.testing;
+    var settings = GameSettings{
+        .timeout_turn = 0,
+        .turn_time = 0,
+        .current_time = 0,
+        .timeout_match = 0,
+        .max_memory = 0,
+        .time_left = 2147483647,
+        .game_type = .opponent_is_human,
+        .rule = GameRule{ .rule = 0 },
+        .folder = "",
+        .started = false,
+        .allocator = std.heap.page_allocator,
+    };
+    defer settings.deinit();
+
+    // Test Renju + Caro combination (invalid)
+    const original_rule = settings.rule.rule;
+    settings.handleRule("12", stdout.any()); // 4 + 8 (Renju + Caro)
+    try testing.expectEqual(original_rule, settings.rule.rule);
+
+    // Test invalid bits
+    settings.handleRule("16", stdout.any()); // Invalid bit
+    try testing.expectEqual(original_rule, settings.rule.rule);
+
+    // Test invalid format
+    settings.handleRule("invalid", stdout.any());
+    try testing.expectEqual(original_rule, settings.rule.rule);
 }
 
 test "GameSettings handle folder" {
@@ -430,7 +483,9 @@ test "GameSettings handle folder" {
         .rule = GameRule{ .rule = 0 },
         .folder = "",
         .started = false,
+        .allocator = std.heap.page_allocator,
     };
+    defer settings.deinit();
 
     // Test folder setting
     settings.handleFolder("/test/path", stdout.any());
@@ -439,4 +494,54 @@ test "GameSettings handle folder" {
     // Test changing folder
     settings.handleFolder("/new/path", stdout.any());
     try testing.expectEqualStrings("/new/path", settings.folder);
+}
+
+test "GameSettings handle failing allocation on folder modification" {
+    const testing = std.testing;
+    // Create a failing allocator that fails after N allocations
+    var failing_allocator = testing.FailingAllocator.init(
+        testing.allocator, .{.fail_index = 1}
+    ); // Will fail after 1 successful allocation.
+    var settings = GameSettings{
+        .timeout_turn = 0,
+        .turn_time = 0,
+        .current_time = 0,
+        .timeout_match = 0,
+        .max_memory = 0,
+        .time_left = 2147483647,
+        .game_type = .opponent_is_human,
+        .rule = GameRule{ .rule = 0 },
+        .folder = "",
+        .started = false,
+        .allocator = failing_allocator.allocator(),
+    };
+    defer settings.deinit();
+
+    // First allocation should succeed.
+    settings.handleFolder("/test/path", stdout.any());
+    try testing.expectEqualStrings("/test/path", settings.folder);
+
+    // Second allocation should fail.
+    settings.handleFolder("/new/path", stdout.any());
+    try testing.expectEqualStrings("", settings.folder);
+}
+
+test "handleInfoCommand" {
+    const testing = std.testing;
+
+    // Test valid commands
+    handleInfoCommand("timeout_turn 5000", stdout.any());
+    try testing.expectEqual(@as(u64, 5000), gameSettings.timeout_turn);
+
+    handleInfoCommand("game_type 1", stdout.any());
+    try testing.expectEqual(GameType.opponent_is_brain, gameSettings.game_type);
+
+    // Test invalid command
+    const original_type = gameSettings.game_type;
+    handleInfoCommand("invalid_command 1", stdout.any());
+    try testing.expectEqual(original_type, gameSettings.game_type);
+
+    // Test command without parameter
+    handleInfoCommand("timeout_turn", stdout.any());
+    try testing.expectEqual(@as(u64, 5000), gameSettings.timeout_turn);
 }
