@@ -139,6 +139,7 @@ pub fn main() !void {
 
     allocator = arena.allocator();
     message.init(allocator);
+    defer game.gameSettings.deinit();
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
