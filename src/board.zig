@@ -110,6 +110,47 @@ pub const Board = struct {
     }
 };
 
+/// ###### This function list the empty cells of the board then make a random choise and return coordinates of the choosen cell.
+/// - Parameters:
+///     - board: The board we want to find a random empty cell.
+///     - random: The random generator we want to use.
+pub fn findRandomValidCell(board: Board, random: std.rand.Random) !Coordinates {
+    // Count empty cells
+    var empty_count: u32 = 0;
+    for (board.map) |cell| {
+        if (cell == Cell.empty) {
+            empty_count += 1;
+        }
+    }
+
+    // If no empty cells, return error
+    if (empty_count == 0) {
+        return error.NoEmptyCells;
+    }
+
+    // Get a random number between 0 and empty_count - 1
+    const target = random.uintLessThan(u32, empty_count);
+
+    // Find the target empty cell
+    var current_empty: u32 = 0;
+    for (board.map, 0..) |cell, index| {
+        if (cell == Cell.empty) {
+            if (current_empty == target) {
+                // Convert index back to coordinates
+                const y = @divTrunc(index, board.width);
+                const x = index % board.width;
+                return Coordinates{
+                    .x = @intCast(x),
+                    .y = @intCast(y),
+                };
+            }
+            current_empty += 1;
+        }
+    }
+
+    unreachable;
+}
+
 test "expect board to have a full cell on x: 2 and y: 0" {
     const height = 20;
     const width = 20;
