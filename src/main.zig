@@ -154,33 +154,6 @@ test {
     std.testing.refAllDecls(board);
 }
 
-// Test message sending functions
-test "sendMessage basic functionality" {
-    var list = std.ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-
-    try message.sendMessage("test", list.writer().any());
-    try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
-}
-
-test "sendMessageComptime basic functionality" {
-    var list = std.ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-
-    try message.sendMessageComptime("test", list.writer().any());
-    try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
-}
-
-test "sendLogF functionality" {
-    allocator = std.testing.allocator;
-    var list = std.ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    message.init(allocator);
-
-    try message.sendLogF(.ERROR, "test {s}", .{"message"}, list.writer().any());
-    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR test message\n"));
-}
-
 // Test command handlers
 test "handleAbout command" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
@@ -194,6 +167,7 @@ test "handleStart command valid input" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleStart("START 10", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "OK\n"));
@@ -206,6 +180,7 @@ test "handleStart command invalid input" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleStart("START", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR wrong start command format\n"));
@@ -215,6 +190,7 @@ test "handleStart command too large size" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleStart("START 200", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR invalid size\n"));
@@ -224,6 +200,7 @@ test "handleStart command too small" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleStart("START 2", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR invalid size\n"));
@@ -233,6 +210,7 @@ test "handleStart command invalid number" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleStart("START TNBC", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR error during the parsing of the size: error.InvalidCharacter\n"));
@@ -248,6 +226,7 @@ test "handleCommand unknown command" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     try handleCommand("UNKNOWN", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "UNKNOWN command is not implemented\n"));
@@ -285,6 +264,7 @@ const TestReader = struct {
 test "readLineIntoBuffer - successful read" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     const block = "test\n";
     var test_buf_reader = std.io.BufferedReader(block.len, TestReader){
@@ -299,6 +279,7 @@ test "readLineIntoBuffer - successful read" {
 test "readLineIntoBuffer - empty line" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     const block = "\n";
     var test_buf_reader = std.io.BufferedReader(block.len, TestReader){
@@ -313,6 +294,7 @@ test "readLineIntoBuffer - empty line" {
 test "readLineIntoBuffer - line too long" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
     const block = "a" ** 256 ++ "\n";
     var test_buf_reader = std.io.BufferedReader(block.len, TestReader){

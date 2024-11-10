@@ -58,3 +58,30 @@ pub fn sendLogC(
 pub fn init(allocat: std.mem.Allocator) void {
     allocator = allocat;
 }
+
+// Test message sending functions
+test "sendMessage basic functionality" {
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+
+    try sendMessage("test", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
+}
+
+test "sendMessageComptime basic functionality" {
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+
+    try sendMessageComptime("test", list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
+}
+
+test "sendLogF functionality" {
+    allocator = std.testing.allocator;
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    init(allocator);
+
+    try sendLogF(.ERROR, "test {s}", .{"message"}, list.writer().any());
+    try std.testing.expect(std.mem.eql(u8, list.items, "ERROR test message\n"));
+}
