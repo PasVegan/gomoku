@@ -1,5 +1,7 @@
 const std = @import("std");
 const board = @import("board.zig");
+const message = @import("message.zig");
+const game = @import("game.zig");
 
 const test_allocator = std.testing.allocator;
 const stdout = std.io.getStdOut().writer();
@@ -16,43 +18,6 @@ var width: u32 = 0;
 var height: u32 = 0;
 var game_board: board.Board = undefined;
 
-/// Function used to send a message.
-fn sendMessage(msg: []const u8, writer: std.io.AnyWriter) !void {
-    try writer.writeAll(msg);
-    return writer.writeAll("\n");
-}
-
-/// Function used to send a comptime message.
-fn sendMessageComptime(comptime msg: []const u8, writer: std.io.AnyWriter) !void {
-    return writer.writeAll(msg ++ "\n");
-}
-
-/// Function used to send a raw message.
-fn sendMessageRaw(msg: []const u8, writer: std.io.AnyWriter) !void {
-    return writer.writeAll(msg);
-}
-
-/// Structure representing the log type.
-const LogType = enum {
-    UNKNOWN,
-    ERROR,
-    MESSAGE,
-    DEBUG,
-};
-
-/// Function used to send a format logging message message.
-fn sendLogF(comptime log_type: LogType, comptime fmt: []const u8, args: anytype, writer: std.io.AnyWriter)
-!void {
-    const out = try std.fmt.allocPrint(allocator, @tagName(log_type) ++ " " ++ fmt ++ "\n", args);
-    defer allocator.free(out);
-    return sendMessageRaw(out, writer);
-}
-
-/// Function used to send a basic logging message (calculated at compile).
-fn sendLogC(comptime log_type: LogType, comptime msg: []const u8, writer: std.io.AnyWriter) !void {
-    return sendMessageComptime(@tagName(log_type) ++ " " ++ msg, writer);
-}
-
 /// Function used to handle the about command.
 /// - Behavior:
 ///     - Sending basic informations about the bot.
@@ -60,38 +25,44 @@ fn handleAbout(_: []const u8, writer: std.io.AnyWriter) !void {
     const bot_name = "TNBC";
     const about_answer = "name=\"" ++ bot_name ++ "\", version=\"0.1\"";
 
-    return sendMessageComptime(about_answer, writer);
+    return message.sendMessageComptime(about_answer, writer);
 }
 
 /// Function representing the start command, allocate the board.
 fn handleStart(msg: []const u8, writer: std.io.AnyWriter) !void {
     if (msg.len < 7 or msg[5] != ' ') { // at least "START " + 1 digit
-        try sendLogC(.ERROR, "wrong start command format", writer);
+        try message.sendLogC(.ERROR, "wrong start command format", writer);
         return;
     }
     const size = std.fmt.parseUnsigned(u32, msg[6..], 10) catch |err| {
-        try sendLogF(.ERROR, "error during the parsing of the size: {}", .{err}, writer);
+        try message.sendLogF(.ERROR, "error during the parsing of the size: {}", .{err}, writer);
         return;
     };
     if (size * size > 10000 or size < 5) {
-        try sendLogC(.ERROR, "invalid size", writer);
+        try message.sendLogC(.ERROR, "invalid size", writer);
         return;
     }
     width = size;
     height = size;
     game_board = board.Board.init(allocator, allocator, size, size) catch |err| {
-        try sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
+        try message.sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
         return;
     };
-    try sendMessageComptime("OK", writer);
+    try message.sendMessageComptime("OK", writer);
 }
 
 fn handleEnd(_: []const u8, _: std.io.AnyWriter) !void {
     should_stop = true;
 }
 
-fn handleInfo(_: []const u8, _: std.io.AnyWriter) !void {
-    // Handle infos
+fn handleInfo(msg: []const u8, writer: std.io.AnyWriter) !void {
+    // Skip "INFO ".
+    if (msg.len <= 5) {
+        // Ignore it, it is probably not important. (Protocol)
+        return;
+    }
+    // Call the handleInfoCommand removing the "INFO " bytes.
+    return game.handleInfoCommand(msg[5..], writer);
 }
 
 fn handleBegin(_: []const u8, _: std.io.AnyWriter) !void {
@@ -136,7 +107,7 @@ fn handleCommand(cmd: []const u8, writer: std.io.AnyWriter) !void {
             return @call(.auto, mapping.func, .{cmd, writer});
         }
     }
-    return sendLogC(.UNKNOWN, "command is not implemented", writer);
+    return message.sendLogC(.UNKNOWN, "command is not implemented", writer);
 }
 
 /// Function used to read a line into a buffer.
@@ -151,7 +122,7 @@ fn readLineIntoBuffer(
 ) !void {
     read_buffer.len = 0;
     input_reader.streamUntilDelimiter(read_buffer.writer(), '\n', 256) catch |err| {
-        try sendLogF(.ERROR, "error during the stream capture: {}", .{err}, writer);
+        try message.sendLogF(.ERROR, "error during the stream capture: {}", .{err}, writer);
         return;
     };
     // EOF handling
@@ -167,6 +138,7 @@ pub fn main() !void {
     defer arena.deinit();
 
     allocator = arena.allocator();
+    message.init(allocator);
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
@@ -187,7 +159,7 @@ test "sendMessage basic functionality" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
 
-    try sendMessage("test", list.writer().any());
+    try message.sendMessage("test", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
 }
 
@@ -195,7 +167,7 @@ test "sendMessageComptime basic functionality" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
 
-    try sendMessageComptime("test", list.writer().any());
+    try message.sendMessageComptime("test", list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "test\n"));
 }
 
@@ -203,8 +175,9 @@ test "sendLogF functionality" {
     allocator = std.testing.allocator;
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
+    message.init(allocator);
 
-    try sendLogF(.ERROR, "test {s}", .{"message"}, list.writer().any());
+    try message.sendLogF(.ERROR, "test {s}", .{"message"}, list.writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR test message\n"));
 }
 
