@@ -213,7 +213,7 @@ const infoCommandMappings: []const InfoCommandMapping = &[_]InfoCommandMapping{
 /// Function used to handle info commands.
 /// - Parameters:
 ///     - cmd: An info command to executes.
-pub fn handleInfoCommand(cmd: []const u8, writer: std.io.AnyWriter) void {
+pub fn handleInfoCommand(cmd: []const u8, writer: std.io.AnyWriter) !void {
     for (infoCommandMappings) |mapping| {
         // Verifying if there is
         if (std.ascii.startsWithIgnoreCase(cmd, mapping.cmd)) {
@@ -230,6 +230,7 @@ pub fn handleInfoCommand(cmd: []const u8, writer: std.io.AnyWriter) void {
             });
         }
     }
+    return;
 }
 
 // Global variable holding game settings.
@@ -530,18 +531,18 @@ test "handleInfoCommand" {
     const testing = std.testing;
 
     // Test valid commands
-    handleInfoCommand("timeout_turn 5000", stdout.any());
+    try handleInfoCommand("timeout_turn 5000", stdout.any());
     try testing.expectEqual(@as(u64, 5000), gameSettings.timeout_turn);
 
-    handleInfoCommand("game_type 1", stdout.any());
+    try handleInfoCommand("game_type 1", stdout.any());
     try testing.expectEqual(GameType.opponent_is_brain, gameSettings.game_type);
 
     // Test invalid command
     const original_type = gameSettings.game_type;
-    handleInfoCommand("invalid_command 1", stdout.any());
+    try handleInfoCommand("invalid_command 1", stdout.any());
     try testing.expectEqual(original_type, gameSettings.game_type);
 
     // Test command without parameter
-    handleInfoCommand("timeout_turn", stdout.any());
+    try handleInfoCommand("timeout_turn", stdout.any());
     try testing.expectEqual(@as(u64, 5000), gameSettings.timeout_turn);
 }
