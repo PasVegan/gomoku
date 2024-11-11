@@ -4,8 +4,17 @@ const Coordinates = @import("coordinates.zig").Coordinates(u32);
 /// # Enumeration representing a map cell.
 pub const Cell = enum {
     empty,
-    player1,
-    player2
+    own,
+    opponent,
+    winning_line_or_forbidden,
+
+    // Method used to check
+    pub fn isAvailableCell(number: u32) bool {
+        switch (number) {
+            1...3 => return true,
+            else => return false,
+        }
+    }
 };
 
 /// # Structure containing the board of the gomoku.
@@ -89,13 +98,14 @@ pub const Board = struct {
     ///     - self: The board on which you want to set the cell.
     ///     - x: The coordinate on x-axis.
     ///     - y: The coordinate on y-axis.
-    pub fn setCellByCoordinates(self: *Board, x: u32, y: u32,
-    value: Cell) !void {
+    pub fn setCellByCoordinates(
+        self: *Board, x: u32, y: u32, value: Cell
+    ) !void {
         self.map[coordinatesToIndex(self.*, x, y)] = value;
-        try self.move_history.append(Coordinates{
+        self.move_history.append(Coordinates{
             .x = x,
             .y = y,
-        });
+        }) catch |err| return err;
     }
 
     /// # Method used to obtain a index from coordinates.
@@ -109,6 +119,9 @@ pub const Board = struct {
         return y * self.width + x;
     }
 };
+
+// The game board.
+pub var game_board: Board = undefined;
 
 /// ###### This function list the empty cells of the board then make a random choise and return coordinates of the choosen cell.
 /// - Parameters:
@@ -163,12 +176,12 @@ test "expect board to have a full cell on x: 2 and y: 0" {
     defer board.deinit(std.testing.allocator);
 
     // Set coordinates.
-    board.setCellByCoordinates(x, y, Cell.player1) catch |err| { return err; };
+    board.setCellByCoordinates(x, y, Cell.own) catch |err| { return err; };
 
     // Verifying the board.
     try std.testing.expect(board.height == height);
     try std.testing.expect(board.width == width);
-    try std.testing.expect(board.getCellByCoordinates(x, y) == Cell.player1);
+    try std.testing.expect(board.getCellByCoordinates(x, y) == Cell.own);
     try std.testing.expect(board.getCellByCoordinates(x + 1, y) == Cell.empty);
     try std.testing.expect(
         board.isCoordinatesOutside(width, height - 1) == true
