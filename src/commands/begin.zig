@@ -4,10 +4,7 @@ const board = @import("../board.zig");
 const main = @import("../main.zig");
 
 pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
-    const empty_cell = board.findRandomValidCell(main.game_board, main.random) catch |err| {
-        try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
-        return;
-    };
+    const empty_cell = try board.findRandomValidCell(main.game_board, main.random);
     try main.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.player1);
 
     try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
