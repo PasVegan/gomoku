@@ -25,6 +25,11 @@ pub fn sendMessageRaw(msg: []const u8, writer: std.io.AnyWriter) !void {
     return writer.writeAll(msg);
 }
 
+/// Function used to send a formated message.
+pub fn sendMessageF(comptime fmt: []const u8, args: anytype, writer: std.io.AnyWriter) !void {
+    try std.fmt.format(writer, fmt ++ "\n", args);
+}
+
 /// Structure representing the log type.
 pub const LogType = enum {
     UNKNOWN,
