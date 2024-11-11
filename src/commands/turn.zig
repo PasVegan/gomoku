@@ -55,9 +55,16 @@ test "handleTurn command valid input" {
     // Check if we received the coordinates
     const comma_pos = std.mem.indexOf(u8, list.items, ",");
     try std.testing.expect(comma_pos != null);
-    try std.testing.expectEqual(u32, @TypeOf(try std.fmt.parseUnsigned(u32, list.items[0..comma_pos.?], 10)));
-    try std.testing.expectEqual(u32, @TypeOf(try std.fmt.parseUnsigned(u32, list.items[comma_pos.? + 1..list.items.len - 1], 10)));
+
+    // Check that the player2 stone was placed
     try std.testing.expectEqual(board.Cell.player2, main.game_board.getCellByCoordinates(5, 5));
+
+    // Check that that our stone was placed
+    const x = try std.fmt.parseUnsigned(u32, list.items[0..comma_pos.?], 10);
+    const y = try std.fmt.parseUnsigned(u32, list.items[comma_pos.? + 1..list.items.len - 1], 10);
+    try std.testing.expectEqual(u32, @TypeOf(x));
+    try std.testing.expectEqual(u32, @TypeOf(y));
+    try std.testing.expectEqual(board.Cell.player1, main.game_board.getCellByCoordinates(x, y));
 }
 
 test "handleTurn command invalid format - too short" {
