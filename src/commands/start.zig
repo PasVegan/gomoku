@@ -19,7 +19,7 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
     }
     main.width = size;
     main.height = size;
-    main.game_board = board.Board.init(main.allocator, main.allocator, size, size) catch |err| {
+    board.game_board = board.Board.init(main.allocator, main.allocator, size, size) catch |err| {
         try message.sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
         return;
     };
@@ -36,7 +36,7 @@ test "handleStart command valid input" {
     try std.testing.expectEqualStrings("OK\n", list.items);
     try std.testing.expectEqual(10, main.width);
     try std.testing.expectEqual(10, main.height);
-    main.game_board.deinit(main.allocator);
+    board.game_board.deinit(main.allocator);
 }
 
 test "handleStart command invalid input" {

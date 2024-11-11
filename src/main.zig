@@ -3,10 +3,11 @@ const board = @import("board.zig");
 const message = @import("message.zig");
 const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
+const io = @import("io.zig");
 
 const test_allocator = std.testing.allocator;
-const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
+const stdout = std.io.getStdOut().writer();
 
 var prng = std.rand.DefaultPrng.init(0);
 pub const random = prng.random();
@@ -20,7 +21,6 @@ pub var should_stop = false;
 /// Variable for the game board.
 pub var width: u32 = 0;
 pub var height: u32 = 0;
-pub var game_board: board.Board = undefined;
 
 /// Structure representing the command mapping.
 /// - Attributes:
@@ -54,29 +54,6 @@ fn handleCommand(command: []const u8, writer: std.io.AnyWriter) !void {
     return message.sendLogC(.UNKNOWN, "command is not implemented", writer);
 }
 
-/// Function used to read a line into a buffer.
-/// - Parameters:
-///     - input_reader: The reader to read from.
-///     - read_buffer: The buffer to write into.
-///     - writer: The writer used for logging message.
-fn readLineIntoBuffer(
-    input_reader: std.io.AnyReader,
-    read_buffer: *std.BoundedArray(u8, 256),
-    writer: std.io.AnyWriter
-) !void {
-    read_buffer.len = 0;
-    input_reader.streamUntilDelimiter(read_buffer.writer(), '\n', 256) catch |err| {
-        try message.sendLogF(.ERROR, "error during the stream capture: {}", .{err}, writer);
-        return;
-    };
-    // EOF handling
-    if (read_buffer.len == 0)
-        return;
-    if (read_buffer.buffer[read_buffer.len - 1] == '\r') { // remove the \r if there is one
-        read_buffer.len -= 1;
-    }
-}
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -86,10 +63,18 @@ pub fn main() !void {
     game.gameSettings.allocator = allocator;
     defer game.gameSettings.deinit();
 
+    // Initialize the board.
+    board.game_board = board.Board.init(
+        allocator,
+        allocator,
+        height, width
+    ) catch |err| { return err; };
+    defer board.game_board.deinit(allocator);
+
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
     while (!should_stop) {
-        try readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
+        try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
         try handleCommand(read_buffer.slice(), stdout.any());
     }
 }
@@ -149,7 +134,8 @@ test "readLineIntoBuffer - successful read" {
     };
 
     var buffer = try std.BoundedArray(u8, 256).init(0);
-    try readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list.writer().any());
+    try io.readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list
+    .writer().any());
     try std.testing.expectEqualStrings("test", buffer.slice());
 }
 
@@ -164,7 +150,8 @@ test "readLineIntoBuffer - empty line" {
     };
 
     var buffer = try std.BoundedArray(u8, 256).init(0);
-    try readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list.writer().any());
+    try io.readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list
+    .writer().any());
     try std.testing.expectEqual(@as(usize, 0), buffer.len);
 }
 
@@ -179,6 +166,7 @@ test "readLineIntoBuffer - line too long" {
     };
 
     var buffer = try std.BoundedArray(u8, 256).init(0);
-    try readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list.writer().any());
+    try io.readLineIntoBuffer(test_buf_reader.reader().any(), &buffer, list
+    .writer().any());
     try std.testing.expect(std.mem.eql(u8, list.items, "ERROR error during the stream capture: error.StreamTooLong\n"));
 }
