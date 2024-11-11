@@ -23,21 +23,21 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
             .{err, msg[comma_pos.? + 1..]}, writer);
         return;
     };
-    if (main.game_board.isCoordinatesOutside(x, y)) {
+    if (board.game_board.isCoordinatesOutside(x, y)) {
         try message.sendLogC(.ERROR, "coordinates are outside the board", writer);
         return;
     }
-    if (main.game_board.getCellByCoordinates(x, y) != board.Cell.empty) {
+    if (board.game_board.getCellByCoordinates(x, y) != board.Cell.empty) {
         try message.sendLogC(.ERROR, "cell is not empty", writer);
         return;
     }
-    try main.game_board.setCellByCoordinates(x, y, board.Cell.player2);
+    try board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
 
-    const empty_cell = board.findRandomValidCell(main.game_board, main.random) catch |err| {
+    const empty_cell = board.findRandomValidCell(board.game_board, main.random) catch |err| {
         try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
         return;
     };
-    try main.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.player1);
+    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
 
     try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
 }
@@ -48,8 +48,8 @@ test "handleTurn command valid input" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    main.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
-    defer main.game_board.deinit(std.testing.allocator);
+    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    defer board.game_board.deinit(std.testing.allocator);
 
     try handle("TURN 5,5", list.writer().any());
     // Check if we received the coordinates
@@ -57,14 +57,14 @@ test "handleTurn command valid input" {
     try std.testing.expect(comma_pos != null);
 
     // Check that the player2 stone was placed
-    try std.testing.expectEqual(board.Cell.player2, main.game_board.getCellByCoordinates(5, 5));
+    try std.testing.expectEqual(board.Cell.opponent, board.game_board.getCellByCoordinates(5, 5));
 
     // Check that that our stone was placed
     const x = try std.fmt.parseUnsigned(u32, list.items[0..comma_pos.?], 10);
     const y = try std.fmt.parseUnsigned(u32, list.items[comma_pos.? + 1..list.items.len - 1], 10);
     try std.testing.expectEqual(u32, @TypeOf(x));
     try std.testing.expectEqual(u32, @TypeOf(y));
-    try std.testing.expectEqual(board.Cell.player1, main.game_board.getCellByCoordinates(x, y));
+    try std.testing.expectEqual(board.Cell.own, board.game_board.getCellByCoordinates(x, y));
 }
 
 test "handleTurn command invalid format - too short" {
@@ -133,8 +133,8 @@ test "handleTurn command coordinates out of bounds" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    main.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
-    defer main.game_board.deinit(std.testing.allocator);
+    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    defer board.game_board.deinit(std.testing.allocator);
 
     try handle("TURN 25,25", list.writer().any());
     try std.testing.expectEqualStrings(
@@ -149,8 +149,8 @@ test "handleTurn command cell already taken" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    main.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
-    defer main.game_board.deinit(std.testing.allocator);
+    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    defer board.game_board.deinit(std.testing.allocator);
 
     // First place a stone
     try handle("TURN 5,5", list.writer().any());
@@ -170,15 +170,15 @@ test "handleTurn command no empty cells" {
     message.init(std.testing.allocator);
 
     main.width = 5; main.height = 5;
-    main.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 5, 5);
-    defer main.game_board.deinit(std.testing.allocator);
+    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 5, 5);
+    defer board.game_board.deinit(std.testing.allocator);
 
     // Fill the board
     var x: u32 = 0;
     var y: u32 = 0;
     outer: while (y < main.height) {
         while (x < main.width) {
-            try main.game_board.setCellByCoordinates(x, y, board.Cell.player1);
+            try board.game_board.setCellByCoordinates(x, y, board.Cell.own);
             x += 1;
             if (y == main.height - 1 and x == main.width - 1) {
                 break :outer;
