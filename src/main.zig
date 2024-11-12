@@ -82,6 +82,8 @@ pub fn main() !void {
 // This is a test that will run all the tests in all the other files in the project.
 test {
     std.testing.refAllDecls(@This());
+    should_stop = true;
+    try main();
 }
 
 test "handleCommand unknown command" {
