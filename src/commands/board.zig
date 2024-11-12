@@ -3,8 +3,7 @@ const board = @import("../board.zig");
 const io = @import("../io.zig");
 const message = @import("../message.zig");
 
-const stdin = std.io.getStdIn().reader();
-const stdout = std.io.getStdOut().writer();
+var stdin = std.io.getStdIn().reader().any();
 
 const ParseBoardLineError = error {
 /// Occur when not enough values are provided into the line (ex: 2/3).
@@ -33,13 +32,16 @@ fn getValuesFromBoardLine(
     }
 }
 
-pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
+fn handleBoard (
+    reader: std.io.AnyReader,
+    writer: std.io.AnyWriter
+) !void {
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
     var parsed_values: [3]?u32 = undefined;
 
     while (true) {
         @memset(&parsed_values, null);
-        try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
+        try io.readLineIntoBuffer(reader, &read_buffer, writer);
         if (std.ascii.startsWithIgnoreCase(read_buffer.slice(), "DONE")) {
             // The command is terminated.
             return;
@@ -74,8 +76,8 @@ pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
         )) {
             try message.sendLogF(
                 .ERROR,
-                "error the coordinates are outside the map: x:{} y:{}"
-                ++ "map_width:{} map_height:{}",
+                "error the coordinates are outside the map: x:{} y:{} "
+                    ++ "map_width:{} map_height:{}",
                 .{parsed_values[0].?, parsed_values[1].?,
                     board.game_board.width, board.game_board.height},
                 writer
@@ -91,6 +93,164 @@ pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
             try message.sendLogF(.ERROR, "error: {}", .{err}, writer);
         };
     }
+}
+
+pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
+    return handleBoard(stdin, writer);
+}
+
+test "handle valid input" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with valid input
+    var fbs = std.io.fixedBufferStream(
+        "1,1,1\n2,2,2\nDONE\n"
+    );
+
+    // Initialize the board.
+    board.game_board = board.Board.init(
+        testing.allocator,
+        testing.allocator,
+        3, 3
+    ) catch |err| { return err; };
+    defer board.game_board.deinit(testing.allocator);
+
+    stdin = fbs.reader().any();
+    try handle("", buffer.writer().any());
+
+    // Verify the board state
+    try testing.expectEqual(board.Cell.own, board.game_board.getCellByCoordinates(1, 1));
+    try testing.expectEqual(board.Cell.opponent, board.game_board.getCellByCoordinates(2, 2));
+}
+
+test "handleBoard valid input" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with valid input
+    var fbs = std.io.fixedBufferStream(
+        "1,1,1\n2,2,2\nDONE\n"
+    );
+
+    // Initialize the board.
+    board.game_board = board.Board.init(
+        testing.allocator,
+        testing.allocator,
+        3, 3
+    ) catch |err| { return err; };
+    defer board.game_board.deinit(testing.allocator);
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify the board state
+    try testing.expectEqual(board.Cell.own, board.game_board.getCellByCoordinates(1, 1));
+    try testing.expectEqual(board.Cell.opponent, board.game_board.getCellByCoordinates(2, 2));
+}
+
+test "handleBoard invalid coordinates" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with coordinates outside board
+    var fbs = std.io.fixedBufferStream(
+        "999,999,1\nDONE\n"
+    );
+
+    // Initialize the board.
+    board.game_board = board.Board.init(
+        testing.allocator,
+        testing.allocator,
+        3, 3
+    ) catch |err| { return err; };
+    defer board.game_board.deinit(testing.allocator);
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify error message was written
+    try testing.expect(std.mem.eql(u8, buffer.items,
+        "ERROR error the coordinates are outside the map: x:999 y:999 "
+        ++ "map_width:3 map_height:3\n"
+    ));
+}
+
+test "handleBoard invalid cell type" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with invalid cell type
+    var fbs = std.io.fixedBufferStream(
+        "1,1,99\nDONE\n"
+    );
+
+    // Initialize the board.
+    board.game_board = board.Board.init(
+        testing.allocator,
+        testing.allocator,
+        3, 3
+    ) catch |err| { return err; };
+    defer board.game_board.deinit(testing.allocator);
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify error message was written
+    try testing.expect(std.mem.eql(u8, buffer.items,
+        "ERROR the cell type is not recognized: 99\n"
+    ));
+}
+
+test "handleBoard parse error not enough values" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with invalid format
+    var fbs = std.io.fixedBufferStream(
+        "1,1\nDONE\n"
+    );
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify error message was written
+    try testing.expect(std.mem.eql(u8, buffer.items,
+        "ERROR error during board command parsing: error.NotEnoughValues\n"
+    ));
+}
+
+test "handleBoard parse error wrong type" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with invalid format
+    var fbs = std.io.fixedBufferStream(
+        "1,1,test\nDONE\n"
+    );
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify error message was written
+    try testing.expect(std.mem.eql(u8, buffer.items,
+        "ERROR error during board command parsing: error.InvalidCharacter\n"
+    ));
+}
+
+test "handleBoard early DONE" {
+    const testing = std.testing;
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    // Setup a test reader with immediate DONE
+    var fbs = std.io.fixedBufferStream("DONE\n");
+
+    try handleBoard(fbs.reader().any(), buffer.writer().any());
+
+    // Verify function returns without error
+    try testing.expect(buffer.items.len == 0);
 }
 
 test "getValuesFromBoardLine valid input" {
