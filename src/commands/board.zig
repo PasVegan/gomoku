@@ -2,6 +2,8 @@ const std = @import("std");
 const board = @import("../board.zig");
 const io = @import("../io.zig");
 const message = @import("../message.zig");
+const main = @import("../main.zig");
+const game = @import("../game.zig");
 
 var stdin = std.io.getStdIn().reader().any();
 
@@ -40,41 +42,40 @@ fn handleBoard (
     var parsed_values: [3]?u32 = undefined;
 
     while (true) {
-        @memset(&parsed_values, null);
         try io.readLineIntoBuffer(reader, &read_buffer, writer);
         if (std.ascii.startsWithIgnoreCase(read_buffer.slice(), "DONE")) {
             // The command is terminated.
-            return;
+            break;
         }
+        // Clear the parsed_values array.
+        @memset(&parsed_values, null);
         // Parse values and sets them into parsed_values array.
         getValuesFromBoardLine(
             read_buffer.slice(),
             &parsed_values
         ) catch |err| {
-            try message.sendLogF(
+            return try message.sendLogF(
                 .ERROR,
                 "error during board command parsing: {}",
                 .{err},
                 writer
             );
-            continue;
         };
         // Verify the cell type.
         if (!board.Cell.isAvailableCell(parsed_values[2].?)) {
-            try message.sendLogF(
+            return try message.sendLogF(
                 .ERROR,
                 "the cell type is not recognized: {}",
                 .{parsed_values[2].?},
                 writer
             );
-            continue;
         }
         // Verify the cell coordinates.
         if (board.game_board.isCoordinatesOutside(
             parsed_values[0].?,
             parsed_values[1].?
         )) {
-            try message.sendLogF(
+            return try message.sendLogF(
                 .ERROR,
                 "error the coordinates are outside the map: x:{} y:{} "
                     ++ "map_width:{} map_height:{}",
@@ -82,7 +83,6 @@ fn handleBoard (
                     board.game_board.width, board.game_board.height},
                 writer
             );
-            continue;
         }
         // Finally set the cell on the board.
         board.game_board.setCellByCoordinates(
@@ -90,9 +90,14 @@ fn handleBoard (
             parsed_values[1].?,
             @enumFromInt(parsed_values[2].?)
         ) catch |err| {
-            try message.sendLogF(.ERROR, "error: {}", .{err}, writer);
+            return try message.sendLogF(.ERROR, "error: {}", .{err}, writer);
         };
     }
+    // Send coordinates.
+    const empty_cell = try board.findRandomValidCell(board.game_board, main.random);
+    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
+    try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
+    return;
 }
 
 pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
@@ -244,13 +249,32 @@ test "handleBoard early DONE" {
     var buffer = std.ArrayList(u8).init(testing.allocator);
     defer buffer.deinit();
 
+    // Initialize the board.
+    board.game_board = board.Board.init(std.testing.allocator, std.testing
+    .allocator, 3, 3) catch |err| { return err; };
+    defer board.game_board.deinit(std.testing.allocator);
+
     // Setup a test reader with immediate DONE
     var fbs = std.io.fixedBufferStream("DONE\n");
 
     try handleBoard(fbs.reader().any(), buffer.writer().any());
 
-    // Verify function returns without error
-    try testing.expect(buffer.items.len == 0);
+    const comma_pos = std.mem.indexOf(u8, buffer.items, ",");
+    try std.testing.expect(comma_pos != null);
+
+    const x = try std.fmt.parseUnsigned(
+        u32,
+        buffer.items[0..comma_pos.?],
+        10
+    );
+    const y = try std.fmt.parseUnsigned(
+        u32,
+        buffer.items[comma_pos.? + 1..buffer.items.len - 1],
+        10
+    );
+    try std.testing.expectEqual(u32, @TypeOf(x));
+    try std.testing.expectEqual(u32, @TypeOf(y));
+    try std.testing.expectEqual(board.Cell.own, board.game_board.getCellByCoordinates(x, y));
 }
 
 test "getValuesFromBoardLine valid input" {
