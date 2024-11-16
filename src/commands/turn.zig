@@ -237,3 +237,35 @@ test "handleTurn command cell already taken" {
         list.items
     );
 }
+
+test "handleTurn command no empty cells" {
+    var list = std.ArrayList(u8).init(std.testing.allocator);
+    defer list.deinit();
+    message.init(std.testing.allocator);
+
+    main.width = 5; main.height = 5;
+    board.game_board = try board.Board.init(std.testing.allocator, 5, 5);
+    defer board.game_board.deinit(std.testing.allocator);
+
+    // Fill the board
+    var x: u32 = 0;
+    var y: u32 = 0;
+    outer: while (y < main.height) {
+        while (x < main.width) {
+            board.game_board.setCellByCoordinates(x, y, board.Cell.own);
+            x += 1;
+            if (y == main.height - 1 and x == main.width - 1) {
+                break :outer;
+            }
+        }
+        x = 0;
+        y += 1;
+    }
+
+    // Fill the last cell
+    try handle("TURN 4,4", list.writer().any());
+    try std.testing.expectEqualStrings(
+        "ERROR error during the search of a random cell: error.NoEmptyCells\n",
+        list.items
+    );
+}

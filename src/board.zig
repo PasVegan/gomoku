@@ -61,6 +61,26 @@ pub const Board = struct {
         map_allocator.free(self.map);
     }
 
+    /// # Method used to clone a board.
+    pub fn clone(
+        self: Board,
+        map_allocator: std.mem.Allocator,
+    ) !Board {
+        // Create a new board.
+        const new_map = try map_allocator.alloc(
+            Cell, self.height * self.width
+        );
+
+        // Copy the existing map data into the new map
+        @memcpy(new_map, self.map);
+
+        return Board{
+            .map = new_map,
+            .height = self.height,
+            .width = self.width,
+        };
+    }
+
     /// # Method used to know if a coordinate is outside the map.
     /// - Parameters:
     ///     - self: The board we want to check.
@@ -103,6 +123,129 @@ pub const Board = struct {
     ///     - The index in the map array.
     fn coordinatesToIndex(self: Board, x: u32, y: u32) u32 {
         return y * self.width + x;
+    }
+
+    /// # Method used to check if the board is full.
+    /// - Returns:
+    ///     - False if not full, true if full.
+    pub fn isFull(self: Board) bool {
+        for (self.map) |cell|
+            if (cell == .empty)
+                return false;
+        return true;
+    }
+
+    /// Method used to obtain empty positions.
+    pub fn getEmptyPositions(
+        self: Board,
+        allocator: std.mem.Allocator
+    ) !std.ArrayList(Coordinates) {
+        var positions = std.ArrayList(Coordinates).init(allocator);
+        for (0..self.height) |y| {
+            for (0..self.width) |x| {
+                if (getCellByCoordinates(
+                    self, @intCast(x), @intCast(y)
+                ) == Cell.empty) {
+                    try positions.append(Coordinates{
+                        .x = @intCast(x),
+                        .y = @intCast(y)
+                    });
+                }
+            }
+        }
+        return positions;
+    }
+
+    /// Check if there's a win at the given position by checking all directions
+    /// Returns true if there's a win, false otherwise.
+    pub fn isWin(board: Board, x: u32, y: u32) bool {
+        const directions = [_][2]i32{
+            [_]i32{ 1, 0 },   // horizontal
+            [_]i32{ 0, 1 },   // vertical
+            [_]i32{ 1, 1 },   // diagonal right
+            [_]i32{ 1, -1 },  // diagonal left
+        };
+
+        const current_cell = board.getCellByCoordinates(x, y);
+        if (current_cell == Cell.empty) return false;
+
+        // Helper function to check if coordinates are valid.
+        const isValidPosition = struct {
+            fn check(brd: Board, pos_x: i32, pos_y: i32) bool {
+                return pos_x >= 0 and pos_y >= 0 and
+                        pos_x < brd.width and pos_y < brd.height;
+            }
+        }.check;
+
+        inline for (directions) |dir| {
+            var count: i32 = 1;
+
+            // Check both directions in a single loop.
+            inline for ([_]i32{1, -1}) |multiplier| {
+                inline for ([_]i32{1, 2, 3, 4}) |i| {
+                    const new_x = @as(i32, @intCast(x)) + (dir[0] * i * multiplier);
+                    const new_y = @as(i32, @intCast(y)) + (dir[1] * i * multiplier);
+
+                    if (!isValidPosition(board, new_x, new_y)) break;
+
+                    const check_x = @as(u32, @intCast(new_x));
+                    const check_y = @as(u32, @intCast(new_y));
+                    if (board.getCellByCoordinates(check_x, check_y) != current_cell) break;
+                    count += 1;
+                }
+            }
+
+            if (count >= 5) return true;
+        }
+
+        return false;
+    }
+
+    /// Method used to display the board.
+    pub fn display(self: Board, writer: anytype) !void {
+        // Print column numbers
+        try writer.writeAll("   "); // Padding for row numbers
+        for (0..self.width) |x| {
+            if (x + 1 == self.width) {
+                if (x < 10) {
+                    try writer.print(" {d}", .{x});
+                } else {
+                    try writer.print("{d}", .{x});
+                }
+            } else {
+                if (x < 10) {
+                    try writer.print(" {d} ", .{x});
+                } else {
+                    try writer.print("{d} ", .{x});
+                }
+            }
+        }
+        try writer.writeAll("\n");
+
+        // Print the board with row numbers
+        for (0..self.height) |y| {
+            if (y < 10) {
+                try writer.print(" {d} ", .{y});
+            } else {
+                try writer.print("{d} ", .{y});
+            }
+
+            for (0..self.width) |x| {
+                const cell = self.getCellByCoordinates(@intCast(x), @intCast(y));
+                const symbol = switch (cell) {
+                    .empty => ".",
+                    .own => "O",
+                    .opponent => "X",
+                    .winning_line_or_forbidden => "#",
+                };
+                if (x + 1 == self.width) {
+                    try writer.print(" {s}", .{symbol});
+                } else {
+                    try writer.print(" {s} ", .{symbol});
+                }
+            }
+            try writer.writeAll("\n");
+        }
     }
 
     /// Check if there's a win at the given position by checking all directions
@@ -289,4 +432,201 @@ test "expect board to have a full cell on x: 2 and y: 0" {
     try std.testing.expect(
         board.isCoordinatesOutside(width - 1, height - 1) == false
     );
+}
+
+test "Gomoku win conditions" {
+    const testing = std.testing;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Test board 15x15
+    var board = try Board.init(allocator, 15, 15);
+    defer board.deinit(allocator);
+
+    // Test horizontal win
+    board.setCellByCoordinates(0, 0, Cell.own);
+    board.setCellByCoordinates(1, 0, Cell.own);
+    board.setCellByCoordinates(2, 0, Cell.own);
+    board.setCellByCoordinates(3, 0, Cell.own);
+    board.setCellByCoordinates(4, 0, Cell.own);
+    try testing.expect(board.isWin(2, 0));
+
+    // Reset board
+    board = try Board.init(allocator, 15, 15);
+
+    // Test vertical win
+    board.setCellByCoordinates(0, 0, Cell.opponent);
+    board.setCellByCoordinates(0, 1, Cell.opponent);
+    board.setCellByCoordinates(0, 2, Cell.opponent);
+    board.setCellByCoordinates(0, 3, Cell.opponent);
+    board.setCellByCoordinates(0, 4, Cell.opponent);
+    try testing.expect(board.isWin(0, 2));
+
+    // Reset board
+    board = try Board.init(allocator, 15, 15);
+
+    // Test diagonal right win
+    board.setCellByCoordinates(0, 0, Cell.own);
+    board.setCellByCoordinates(1, 1, Cell.own);
+    board.setCellByCoordinates(2, 2, Cell.own);
+    board.setCellByCoordinates(3, 3, Cell.own);
+    board.setCellByCoordinates(4, 4, Cell.own);
+    try testing.expect(board.isWin(2, 2));
+
+    // Reset board
+    board = try Board.init(allocator, 15, 15);
+
+    // Test diagonal left win
+    board.setCellByCoordinates(4, 0, Cell.opponent);
+    board.setCellByCoordinates(3, 1, Cell.opponent);
+    board.setCellByCoordinates(2, 2, Cell.opponent);
+    board.setCellByCoordinates(1, 3, Cell.opponent);
+    board.setCellByCoordinates(0, 4, Cell.opponent);
+    try testing.expect(board.isWin(2, 2));
+
+    // Test no win conditions
+    // Reset board
+    board = try Board.init(allocator, 15, 15);
+
+    // Test incomplete line
+    board.setCellByCoordinates(0, 0, Cell.own);
+    board.setCellByCoordinates(1, 0, Cell.own);
+    board.setCellByCoordinates(2, 0, Cell.own);
+    board.setCellByCoordinates(3, 0, Cell.own);
+    try testing.expect(!board.isWin(2, 0));
+
+    // Test broken line
+    board.setCellByCoordinates(4, 0, Cell.opponent);
+    try testing.expect(!board.isWin(2, 0));
+
+    // Test empty position
+    try testing.expect(!board.isWin(5, 5));
+
+    // Test edge cases
+    // Test win at board edge
+    board = try Board.init(allocator, 15, 15);
+    board.setCellByCoordinates(14, 10, Cell.own);
+    board.setCellByCoordinates(14, 11, Cell.own);
+    board.setCellByCoordinates(14, 12, Cell.own);
+    board.setCellByCoordinates(14, 13, Cell.own);
+    board.setCellByCoordinates(14, 14, Cell.own);
+    try testing.expect(board.isWin(14, 12));
+}
+
+test "clone method creates an independent board" {
+    const height = 20;
+    const width = 20;
+
+    // Initialize the original board.
+    var original_board = try Board.init(std.testing.allocator, height, width);
+    defer original_board.deinit(std.testing.allocator);
+
+    // Set some cells in the original board.
+    original_board.setCellByCoordinates(1, 1, Cell.own);
+    original_board.setCellByCoordinates(2, 2, Cell.opponent);
+
+    // Clone the original board.
+    var cloned_board = try original_board.clone(std.testing.allocator);
+    defer cloned_board.deinit(std.testing.allocator);
+
+    // Verify that the cloned board has the same properties.
+    try std.testing.expect(cloned_board.height == original_board.height);
+    try std.testing.expect(cloned_board.width == original_board.width);
+    try std.testing.expect(cloned_board.getCellByCoordinates(1, 1) == original_board.getCellByCoordinates(1, 1));
+    try std.testing.expect(cloned_board.getCellByCoordinates(2, 2) == original_board.getCellByCoordinates(2, 2));
+
+    // Verify that the cloned board is independent.
+    // Change the original board.
+    original_board.setCellByCoordinates(1, 1, Cell.empty);
+
+    // Check that the cloned board remains unchanged.
+    try std.testing.expect(cloned_board.getCellByCoordinates(1, 1) == Cell.own);
+}
+
+test "clone method retains move history" {
+    const height = 20;
+    const width = 20;
+
+    // Initialize the original board.
+    var original_board = try Board.init(std.testing.allocator, height, width);
+    defer original_board.deinit(std.testing.allocator);
+
+    // Make some moves.
+    original_board.setCellByCoordinates(1, 1, Cell.own);
+    original_board.setCellByCoordinates(2, 2, Cell.opponent);
+
+    // Clone the original board.
+    var cloned_board = try original_board.clone(std.testing.allocator);
+    defer cloned_board.deinit(std.testing.allocator);
+}
+
+test "clone method allocates separate memory" {
+    const height = 20;
+    const width = 20;
+
+    // Initialize the original board.
+    var original_board = try Board.init(std.testing.allocator, height, width);
+    defer original_board.deinit(std.testing.allocator);
+
+    // Clone the original board.
+    var cloned_board = try original_board.clone(std.testing.allocator);
+    defer cloned_board.deinit(std.testing.allocator);
+
+    // Check that the original and cloned board map do not share the same
+    // pointer.
+    try std.testing.expect(cloned_board.map.ptr != original_board.map.ptr);
+}
+
+test "display board with various cell states" {
+    const height = 5;
+    const width = 5;
+    var board = try Board.init(std.testing.allocator, height, width);
+    defer board.deinit(std.testing.allocator);
+
+    // Set up some test cells
+    board.setCellByCoordinates(1, 1, Cell.own);
+    board.setCellByCoordinates(2, 2, Cell.opponent);
+    board.setCellByCoordinates(3, 3, Cell.winning_line_or_forbidden);
+
+    var output = std.ArrayList(u8).init(std.testing.allocator);
+    defer output.deinit();
+
+    try board.display(output.writer());
+
+    const expected =
+        \\    0  1  2  3  4
+        \\ 0  .  .  .  .  .
+        \\ 1  .  O  .  .  .
+        \\ 2  .  .  X  .  .
+        \\ 3  .  .  .  #  .
+        \\ 4  .  .  .  .  .
+        \\
+    ;
+
+    try std.testing.expectEqualStrings(expected, output.items);
+}
+
+test "display larger board" {
+    const height = 10;
+    const width = 10;
+    var board = try Board.init(std.testing.allocator, height, width);
+    defer board.deinit(std.testing.allocator);
+
+    var output = std.ArrayList(u8).init(std.testing.allocator);
+    defer output.deinit();
+
+    try board.display(output.writer());
+
+    // Verify first line contains correct column numbers
+    const first_line = "    0  1  2  3  4  5  6  7  8  9\n";
+    try std.testing.expect(std.mem.startsWith(u8, output.items, first_line));
+
+    // Verify board dimensions
+    var line_count: usize = 0;
+    var lines = std.mem.splitScalar(u8, output.items, '\n');
+    while (lines.next()) |_| {
+        line_count += 1;
+    }
+    try std.testing.expectEqual(height + 2, line_count); // +2 for column numbers and trailing newline
 }
