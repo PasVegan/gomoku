@@ -2,6 +2,7 @@ const std = @import("std");
 const message = @import("../message.zig");
 const board = @import("../board.zig");
 const main = @import("../main.zig");
+const ai = @import("../ai.zig");
 
 pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
     if (msg.len < 8 or msg[4] != ' ') { // at least "TURN 5,5" for example
@@ -33,13 +34,10 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
     }
     board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
 
-    const empty_cell = board.findRandomValidCell(board.game_board, main.random) catch |err| {
-        try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
-        return;
-    };
-    board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
+    const empty_cell = ai.findBestMove(&board.game_board);
+    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
 
-    try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
+    try message.sendMessageF("{d},{d}", .{empty_cell.col, empty_cell.row}, writer);
 }
 
 test "handleTurn command valid input" {
@@ -47,8 +45,8 @@ test "handleTurn command valid input" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
-    main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
+    main.width = 5; main.height = 5;
+    board.game_board = try board.Board.init(std.testing.allocator, 5, 5);
     defer board.game_board.deinit(std.testing.allocator);
 
     var real_prng = std.Random.DefaultPrng.init(blk: {
@@ -58,13 +56,13 @@ test "handleTurn command valid input" {
     });
     main.random = real_prng.random();
 
-    try handle("TURN 5,5", list.writer().any());
+    try handle("TURN 0,0", list.writer().any());
     // Check if we received the coordinates
     const comma_pos = std.mem.indexOf(u8, list.items, ",");
     try std.testing.expect(comma_pos != null);
 
     // Check that the player2 stone was placed
-    try std.testing.expectEqual(board.Cell.opponent, board.game_board.getCellByCoordinates(5, 5));
+    try std.testing.expectEqual(board.Cell.opponent, board.game_board.getCellByCoordinates(0, 0));
 
     // Check that that our stone was placed
     const x = try std.fmt.parseUnsigned(u32, list.items[0..comma_pos.?], 10);
@@ -174,8 +172,8 @@ test "handleTurn command coordinates out of bounds" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
-    main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
+    main.width = 5; main.height = 5;
+    board.game_board = try board.Board.init(std.testing.allocator, 5, 5);
     defer board.game_board.deinit(std.testing.allocator);
 
     var real_prng = std.Random.DefaultPrng.init(blk: {
@@ -197,8 +195,8 @@ test "handleTurn command cell already taken" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
-    main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
+    main.width = 5; main.height = 5;
+    board.game_board = try board.Board.init(std.testing.allocator, 5, 5);
     defer board.game_board.deinit(std.testing.allocator);
 
     var real_prng = std.Random.DefaultPrng.init(blk: {
@@ -209,52 +207,13 @@ test "handleTurn command cell already taken" {
     main.random = real_prng.random();
 
     // First place a stone
-    try handle("TURN 5,5", list.writer().any());
+    try handle("TURN 0,0", list.writer().any());
     list.clearRetainingCapacity();
 
     // Try to place another stone in the same spot
-    try handle("TURN 5,5", list.writer().any());
+    try handle("TURN 0,0", list.writer().any());
     try std.testing.expectEqualStrings(
         "ERROR cell is not empty\n",
-        list.items
-    );
-}
-
-test "handleTurn command no empty cells" {
-    var list = std.ArrayList(u8).init(std.testing.allocator);
-    defer list.deinit();
-    message.init(std.testing.allocator);
-
-    main.width = 5; main.height = 5;
-    board.game_board = try board.Board.init( std.testing.allocator, 5, 5);
-    defer board.game_board.deinit(std.testing.allocator);
-
-    var real_prng = std.Random.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
-        break :blk seed;
-    });
-    main.random = real_prng.random();
-
-    // Fill the board
-    var x: u32 = 0;
-    var y: u32 = 0;
-    outer: while (y < main.height) {
-        while (x < main.width) {
-            board.game_board.setCellByCoordinates(x, y, board.Cell.own);
-            x += 1;
-            if (y == main.height - 1 and x == main.width - 1) {
-                break :outer;
-            }
-        }
-        x = 0;
-        y += 1;
-    }
-
-    // Fill the last cell
-    try handle("TURN 4,4", list.writer().any());
-    try std.testing.expectEqualStrings(
-        "ERROR error during the search of a random cell: error.NoEmptyCells\n",
         list.items
     );
 }
