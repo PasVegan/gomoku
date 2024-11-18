@@ -22,19 +22,15 @@ pub const Cell = enum {
 ///     - map: 1D array representing the map of the gomoku.
 ///     - height: The height of the map.
 ///     - width: The width of the map.
-///     - last_coordinates: The coordinates of the last move.
 pub const Board = struct {
     map: []Cell,
     height: u32,
     width: u32,
-    move_history: std.ArrayList(Coordinates),
 
     /// # Method used to initialize a board.
     /// - Parameters:
     ///     - map_allocator: The allocator we want to use in order to
     ///     initialize the array's map.
-    ///     - history_allocator: The allocator we want to use in order to
-    ///     initialize the move history.
     ///     the map.
     ///     - height: The height of the map (square).
     ///     - width: The width of the map (square).
@@ -42,33 +38,27 @@ pub const Board = struct {
     ///     - The initialized map.
     pub fn init(
         map_allocator: std.mem.Allocator,
-        history_allocator: std.mem.Allocator,
         height: u32, width: u32
     ) !Board {
         const map = try map_allocator.alloc(Cell, height * width);
         // Initialize the map to zero bytes.
         @memset(map, Cell.empty);
-        const move_history = std.ArrayList(Coordinates).init
-            (history_allocator);
         return Board {
             .map = map,
             .height = height,
-            .width = width,
-            .move_history = move_history,
+            .width = width
         };
     }
 
     /// # Method used to free a board.
     /// - Parameters:
     ///     - map_allocator: The allocator used to initialize the map.
-    ///     - history_allocator: The allocator used to initialize the history.
     ///     - size: The width or height of the map (square).
     pub fn deinit(
         self: *Board,
         map_allocator: std.mem.Allocator,
     ) void {
         map_allocator.free(self.map);
-        self.move_history.clearAndFree();
     }
 
     /// # Method used to know if a coordinate is outside the map.
@@ -100,12 +90,8 @@ pub const Board = struct {
     ///     - y: The coordinate on y-axis.
     pub fn setCellByCoordinates(
         self: *Board, x: u32, y: u32, value: Cell
-    ) !void {
+    ) void {
         self.map[coordinatesToIndex(self.*, x, y)] = value;
-        self.move_history.append(Coordinates{
-            .x = x,
-            .y = y,
-        }) catch |err| return err;
     }
 
     /// # Method used to obtain a index from coordinates.
@@ -118,6 +104,58 @@ pub const Board = struct {
     fn coordinatesToIndex(self: Board, x: u32, y: u32) u32 {
         return y * self.width + x;
     }
+
+    pub fn format(
+        self: Board,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        // Print column coordinates
+        try writer.writeAll("   "); // Padding for row coordinates
+        var x: u32 = 0;
+        while (x < self.width) : (x += 1) {
+            try writer.print(" {d:2}", .{x});
+        }
+        try writer.writeAll("\n");
+
+        // Print top border
+        try writer.writeAll("   ┌");
+        x = 0;
+        while (x < self.width) : (x += 1) {
+            try writer.writeAll("───");
+        }
+        try writer.writeAll("┐\n");
+
+        // Print board content with row coordinates
+        var y: u32 = 0;
+        while (y < self.height) : (y += 1) {
+            try writer.print("{d:2} │", .{y}); // Row coordinate
+            x = 0;
+            while (x < self.width) : (x += 1) {
+                const cell = self.getCellByCoordinates(x, y);
+                const symbol = switch (cell) {
+                    .empty => ".",
+                    .opponent => "●",
+                    .own => "○",
+                    .winning_line_or_forbidden => "X",
+                };
+                try writer.print(" {s} ", .{symbol});
+            }
+            try writer.writeAll("│\n");
+        }
+
+        // Print bottom border
+        try writer.writeAll("   └");
+            x = 0;
+            while (x < self.width) : (x += 1) {
+                try writer.writeAll("───");
+            }
+            try writer.writeAll("┘\n");
+        }
 };
 
 // The game board.
@@ -127,7 +165,7 @@ pub var game_board: Board = undefined;
 /// - Parameters:
 ///     - board: The board we want to find a random empty cell.
 ///     - random: The random generator we want to use.
-pub fn findRandomValidCell(board: Board, random: std.rand.Random) !Coordinates {
+pub fn findRandomValidCell(board: Board, random: std.Random) !Coordinates {
     // Count empty cells
     var empty_count: u32 = 0;
     for (board.map) |cell| {
@@ -171,12 +209,12 @@ test "expect board to have a full cell on x: 2 and y: 0" {
     const y = 0;
 
     // Initialize the board.
-    var board = Board.init(std.testing.allocator, std.testing.allocator,
+    var board = Board.init(std.testing.allocator,
         height, width) catch |err| { return err; };
     defer board.deinit(std.testing.allocator);
 
     // Set coordinates.
-    board.setCellByCoordinates(x, y, Cell.own) catch |err| { return err; };
+    board.setCellByCoordinates(x, y, Cell.own);
 
     // Verifying the board.
     try std.testing.expect(board.height == height);
