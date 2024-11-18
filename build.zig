@@ -72,6 +72,6 @@ pub fn build(b: *std.Build) void {
     coverage_step.dependOn(&kcov_unit.step);
 
     const clean_step = b.step("clean", "Clean up project directory");
-    clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot("zig-out")).step);
-    clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
+    clean_step.dependOn(&b.addRemoveDirTree(b.path("zig-out")).step);
+    clean_step.dependOn(&b.addRemoveDirTree(b.path(".zig-cache")).step);
 }

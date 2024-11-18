@@ -5,7 +5,7 @@ const main = @import("../main.zig");
 
 pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
     const empty_cell = try board.findRandomValidCell(board.game_board, main.random);
-    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
+    board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
 
     try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
 }
@@ -16,7 +16,7 @@ test "handle Begin command" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
 
     try handle("BEGIN", list.writer().any());

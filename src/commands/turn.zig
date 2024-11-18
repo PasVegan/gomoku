@@ -31,13 +31,13 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         try message.sendLogC(.ERROR, "cell is not empty", writer);
         return;
     }
-    try board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
+    board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
 
     const empty_cell = board.findRandomValidCell(board.game_board, main.random) catch |err| {
         try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
         return;
     };
-    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
+    board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
 
     try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
 }
@@ -48,7 +48,7 @@ test "handleTurn command valid input" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
 
     try handle("TURN 5,5", list.writer().any());
@@ -133,7 +133,7 @@ test "handleTurn command coordinates out of bounds" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
 
     try handle("TURN 25,25", list.writer().any());
@@ -149,7 +149,7 @@ test "handleTurn command cell already taken" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
 
     // First place a stone
@@ -170,7 +170,7 @@ test "handleTurn command no empty cells" {
     message.init(std.testing.allocator);
 
     main.width = 5; main.height = 5;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 5, 5);
+    board.game_board = try board.Board.init( std.testing.allocator, 5, 5);
     defer board.game_board.deinit(std.testing.allocator);
 
     // Fill the board
@@ -178,7 +178,7 @@ test "handleTurn command no empty cells" {
     var y: u32 = 0;
     outer: while (y < main.height) {
         while (x < main.width) {
-            try board.game_board.setCellByCoordinates(x, y, board.Cell.own);
+            board.game_board.setCellByCoordinates(x, y, board.Cell.own);
             x += 1;
             if (y == main.height - 1 and x == main.width - 1) {
                 break :outer;

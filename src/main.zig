@@ -9,8 +9,8 @@ const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
 const stdout = std.io.getStdOut().writer();
 
-var prng = std.rand.DefaultPrng.init(0);
-pub const random = prng.random();
+var prng = std.Random.DefaultPrng.init(0);
+pub var random = prng.random();
 
 /// Application memory allocator (arena).
 pub var allocator: std.mem.Allocator = undefined;
@@ -59,15 +59,24 @@ pub fn main() !void {
     defer arena.deinit();
 
     allocator = arena.allocator();
+
     message.init(allocator);
+
     game.gameSettings.allocator = allocator;
     defer game.gameSettings.deinit();
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+
+    random = real_prng.random();
 
     // Initialize the board.
     board.game_board = board.Board.init(
         allocator,
-        allocator,
-        height, width
+        width, height
     ) catch |err| { return err; };
     defer board.game_board.deinit(allocator);
 

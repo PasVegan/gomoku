@@ -13,13 +13,13 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         try message.sendLogF(.ERROR, "error during the parsing of the size: {}", .{err}, writer);
         return;
     };
-    if (size * size > 10000 or size < 5) {
+    if (size * size > 1024 or size < 5) {
         try message.sendLogC(.ERROR, "invalid size", writer);
         return;
     }
     main.width = size;
     main.height = size;
-    board.game_board = board.Board.init(main.allocator, main.allocator, size, size) catch |err| {
+    board.game_board = board.Board.init(main.allocator, size, size) catch |err| {
         try message.sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
         return;
     };
