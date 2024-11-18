@@ -7,9 +7,9 @@
 
 NAME = pbrain-gomoku-ai
 
-ARCHIVE := zig-linux-x86_64-0.13.0.tar.gz
+ARCHIVE := zig-linux-x86_64-0.14.0-dev.1911+3bf89f55c.tar.gz
 
-EXPECTED_OUTPUTS := zig-linux-x86_64-0.13.0/zig
+EXPECTED_OUTPUTS := zig-linux-x86_64-0.14.0-dev.1911+3bf89f55c/zig
 
 # Default target
 all: $(EXPECTED_OUTPUTS)
@@ -17,6 +17,9 @@ all: $(EXPECTED_OUTPUTS)
 
 debug: $(EXPECTED_OUTPUTS)
 	@$(EXPECTED_OUTPUTS) build -p . --prefix-exe-dir . -Doptimize=Debug
+
+tests_run: $(EXPECTED_OUTPUTS)
+	@$(EXPECTED_OUTPUTS) build coverage --summary all
 
 # Rule to check each expected output and extract the tar.gz if any are missing
 $(EXPECTED_OUTPUTS):

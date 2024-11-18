@@ -31,13 +31,13 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         try message.sendLogC(.ERROR, "cell is not empty", writer);
         return;
     }
-    try board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
+    board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
 
     const empty_cell = board.findRandomValidCell(board.game_board, main.random) catch |err| {
         try message.sendLogF(.ERROR, "error during the search of a random cell: {}", .{err}, writer);
         return;
     };
-    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
+    board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
 
     try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
 }
@@ -48,8 +48,15 @@ test "handleTurn command valid input" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     try handle("TURN 5,5", list.writer().any());
     // Check if we received the coordinates
@@ -72,6 +79,13 @@ test "handleTurn command invalid format - too short" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
     try handle("TURN", list.writer().any());
     try std.testing.expectEqualStrings(
         "ERROR wrong TURN command format\n",
@@ -83,6 +97,13 @@ test "handleTurn command invalid format - no space" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     message.init(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     try handle("TURN5,5", list.writer().any());
     try std.testing.expectEqualStrings(
@@ -96,6 +117,13 @@ test "handleTurn command missing comma" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
     try handle("TURN 555", list.writer().any());
     try std.testing.expectEqualStrings(
         "ERROR wrong TURN command format1\n",
@@ -108,6 +136,13 @@ test "handleTurn command invalid x coordinate" {
     defer list.deinit();
     message.init(std.testing.allocator);
 
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
     try handle("TURN a,5", list.writer().any());
     try std.testing.expectEqualStrings(
         "ERROR error during the parsing of the x coordinate: error.InvalidCharacter, val:a\n",
@@ -119,6 +154,13 @@ test "handleTurn command invalid y coordinate" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     message.init(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     try handle("TURN 5,b", list.writer().any());
     try std.testing.expectEqualStrings(
@@ -133,8 +175,15 @@ test "handleTurn command coordinates out of bounds" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     try handle("TURN 25,25", list.writer().any());
     try std.testing.expectEqualStrings(
@@ -149,8 +198,15 @@ test "handleTurn command cell already taken" {
     message.init(std.testing.allocator);
 
     main.width = 20; main.height = 20;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 20, 20);
+    board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     // First place a stone
     try handle("TURN 5,5", list.writer().any());
@@ -170,15 +226,22 @@ test "handleTurn command no empty cells" {
     message.init(std.testing.allocator);
 
     main.width = 5; main.height = 5;
-    board.game_board = try board.Board.init(std.testing.allocator, std.testing.allocator, 5, 5);
+    board.game_board = try board.Board.init( std.testing.allocator, 5, 5);
     defer board.game_board.deinit(std.testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
 
     // Fill the board
     var x: u32 = 0;
     var y: u32 = 0;
     outer: while (y < main.height) {
         while (x < main.width) {
-            try board.game_board.setCellByCoordinates(x, y, board.Cell.own);
+            board.game_board.setCellByCoordinates(x, y, board.Cell.own);
             x += 1;
             if (y == main.height - 1 and x == main.width - 1) {
                 break :outer;
