@@ -10,16 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: mlugg/setup-zig@v1.2.1
-        with:
-          version: 0.14.0-dev.1911+3bf89f55c
       - name: Install kcov
         run: |
           sudo apt-get install -y kcov
       - name: Build
-        run: zig build
+        run: make debug
       - name: Test
-        run: zig build coverage --summary all
+        run: make tests_run
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
