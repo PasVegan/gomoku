@@ -18,6 +18,9 @@ all: $(EXPECTED_OUTPUTS)
 debug: $(EXPECTED_OUTPUTS)
 	@$(EXPECTED_OUTPUTS) build -p . --prefix-exe-dir . -Doptimize=Debug
 
+tests_run: $(EXPECTED_OUTPUTS)
+	@$(EXPECTED_OUTPUTS) build coverage --summary all
+
 # Rule to check each expected output and extract the tar.gz if any are missing
 $(EXPECTED_OUTPUTS):
 	@if [ ! -e $@ ]; then \

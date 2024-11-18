@@ -19,6 +19,13 @@ test "handle Begin command" {
     board.game_board = try board.Board.init(std.testing.allocator, 20, 20);
     defer board.game_board.deinit(std.testing.allocator);
 
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
     try handle("BEGIN", list.writer().any());
     // Check if we received the coordinates
     const comma_pos = std.mem.indexOf(u8, list.items, ",");
