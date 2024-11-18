@@ -4,6 +4,7 @@ const io = @import("../io.zig");
 const message = @import("../message.zig");
 const main = @import("../main.zig");
 const game = @import("../game.zig");
+const ai = @import("../ai.zig");
 
 var stdin = std.io.getStdIn().reader().any();
 
@@ -92,9 +93,9 @@ fn handleBoard (
         );
     }
     // Send coordinates.
-    const empty_cell = try board.findRandomValidCell(board.game_board, main.random);
-    board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
-    try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
+    const empty_cell = ai.findBestMove(&board.game_board);
+    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
+    try message.sendMessageF("{d},{d}", .{empty_cell.col, empty_cell.row}, writer);
     return;
 }
 
@@ -115,7 +116,7 @@ test "handle valid input" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -140,7 +141,7 @@ test "handleBoard valid input" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -164,17 +165,15 @@ test "handleBoard invalid coordinates" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
     try handleBoard(fbs.reader().any(), buffer.writer().any());
 
     // Verify error message was written
-    try testing.expect(std.mem.eql(u8, buffer.items,
-        "ERROR error the coordinates are outside the map: x:999 y:999 "
-        ++ "map_width:3 map_height:3\n"
-    ));
+    try testing.expectEqualStrings("ERROR error the coordinates are outside the map: x:999 y:999 map_width:5 map_height:5\n",
+        buffer.items);
 }
 
 test "handleBoard invalid cell type" {
@@ -190,7 +189,7 @@ test "handleBoard invalid cell type" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -244,7 +243,7 @@ test "handleBoard early DONE" {
     defer buffer.deinit();
 
     // Initialize the board.
-    board.game_board = board.Board.init(std.testing.allocator, 3, 3) catch |err| { return err; };
+    board.game_board = board.Board.init(std.testing.allocator, 5, 5) catch |err| { return err; };
     defer board.game_board.deinit(std.testing.allocator);
 
     // Setup a test reader with immediate DONE
@@ -353,8 +352,8 @@ test "findRandomValidCell with empty board" {
 
 test "findRandomValidCell with full board" {
     const testing = std.testing;
-    const height: u32 = 3;
-    const width: u32 = 3;
+    const height: u32 = 5;
+    const width: u32 = 5;
 
     var test_board = try board.Board.init(
         testing.allocator,
@@ -383,8 +382,8 @@ test "findRandomValidCell with full board" {
 
 test "Board move history" {
     const testing = std.testing;
-    const height: u32 = 3;
-    const width: u32 = 3;
+    const height: u32 = 5;
+    const width: u32 = 5;
 
     var test_board = try board.Board.init(
         testing.allocator,
