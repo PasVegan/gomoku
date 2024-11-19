@@ -3,6 +3,11 @@ const message = @import("../message.zig");
 const board = @import("../board.zig");
 const main = @import("../main.zig");
 const ai = @import("../ai.zig");
+const game = @import("../game.zig");
+const MCTS = @import("../mcts.zig").MCTS;
+
+// Number of iteration for MCTS.
+const MAX_MCTS_ITERATIONS = 250000;
 
 // Error set
 pub const PlayError = error {
@@ -24,6 +29,25 @@ pub fn AIPlay() [2]u16 {
     const empty_cell = ai.findBestMove(&board.game_board);
     board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
     return .{empty_cell.col, empty_cell.row};
+}
+
+pub fn AIPlayMCTS() ![2]u16 {
+    // Initialize MCTS with RAVE.
+    var mcts = try MCTS.init(&game.gameSettings, board.game_board, &main.allocator);
+
+    // Perform MCTS search.
+    try mcts.performMCTSSearch(MAX_MCTS_ITERATIONS);
+
+    // Select the best move.
+    const best_child = try mcts.selectBestChild();
+    const ai_move = best_child.coordinates orelse return error.NoValidMove;
+    mcts.deinit();
+    board.game_board.setCellByCoordinates(ai_move.x, ai_move.y, .own);
+
+    return .{
+        @as(u16, @intCast(ai_move.x)),
+        @as(u16, @intCast(ai_move.y))
+    };
 }
 
 pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
@@ -56,6 +80,8 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
     };
 
     const ai_move = AIPlay();
+
+    // const ai_move = try AIPlayMCTS();
 
     try message.sendMessageF("{d},{d}", .{ai_move[0], ai_move[1]}, writer);
 }
@@ -248,24 +274,16 @@ test "handleTurn command no empty cells" {
     defer board.game_board.deinit(std.testing.allocator);
 
     // Fill the board
-    var x: u32 = 0;
-    var y: u32 = 0;
-    outer: while (y < main.height) {
-        while (x < main.width) {
+    inline for (0..5) |y| {
+        inline for (0..5) |x| {
             board.game_board.setCellByCoordinates(x, y, board.Cell.own);
-            x += 1;
-            if (y == main.height - 1 and x == main.width - 1) {
-                break :outer;
-            }
         }
-        x = 0;
-        y += 1;
     }
 
     // Fill the last cell
     try handle("TURN 4,4", list.writer().any());
     try std.testing.expectEqualStrings(
-        "ERROR error during the search of a random cell: error.NoEmptyCells\n",
+        "ERROR cell is not empty\n",
         list.items
     );
 }

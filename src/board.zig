@@ -125,6 +125,21 @@ pub const Board = struct {
         return y * self.width + x;
     }
 
+    /// # Method used to obtain coordinates from index.
+    /// - Parameters:
+    ///     - self: The current board.
+    ///     - index: The index in the map array.
+    /// - Returns:
+    ///     - The coordinates in the map.
+    pub fn indexToCoordinates(self: Board, index: u64) Coordinates {
+        const y: u32 = @as(u32, @intCast(index)) / self.width;
+        const x: u32 = @as(u32, @intCast(index)) % self.width;
+        return Coordinates {
+            .x = x,
+            .y = y,
+        };
+    }
+
     /// # Method used to check if the board is full.
     /// - Returns:
     ///     - False if not full, true if full.
@@ -136,11 +151,12 @@ pub const Board = struct {
     }
 
     /// Method used to obtain empty positions.
-    pub fn getEmptyPositions(
+    pub fn getEmptyPositionsArrayList(
         self: Board,
         allocator: std.mem.Allocator
     ) !std.ArrayList(Coordinates) {
-        var positions = std.ArrayList(Coordinates).init(allocator);
+        var positions = try std.ArrayList(Coordinates).initCapacity(allocator,
+            self.width * self.height);
         for (0..self.height) |y| {
             for (0..self.width) |x| {
                 if (getCellByCoordinates(
@@ -154,6 +170,22 @@ pub const Board = struct {
             }
         }
         return positions;
+    }
+
+    /// Method used to obtain empty positions.
+    pub fn getEmptyPositions(
+        self: Board,
+        array_to_fill: *[]Coordinates,
+    ) u32 {
+        var index_in_array: u32 = 0;
+        for (0..self.map.len) |index| {
+            if (self.map[index] == Cell.empty) {
+                array_to_fill.*[index_in_array] = self.indexToCoordinates
+                (index);
+                index_in_array += 1;
+            }
+        }
+        return index_in_array;
     }
 
     /// Check if there's a win at the given position by checking all directions

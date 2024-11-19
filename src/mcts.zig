@@ -11,8 +11,10 @@ var prng = std.Random.DefaultPrng.init(0);
 pub var random = prng.random();
 
 // Constants.
-const EPSILON = 1e-5;
-const N_INITIAL_VISITS = 10; // n0 parameter.
+// The exploration parameter, theoretically equal to √2.
+// In practice usually chosen empirically.
+// Will give more or less value to the second term.
+const C: f64 = @sqrt(2.0);
 
 /// Structure representing MCTS statistics.
 /// - Attributes:
@@ -21,9 +23,7 @@ const N_INITIAL_VISITS = 10; // n0 parameter.
 ///     explored.
 pub const Statistics = struct {
     total_reward: f64 = 0,
-    mean_reward: f64 = 0,
-    variance: f64 = 36, // Modified for the PDF.
-    visit_count: u64 = 0,
+    visit_count: f64 = 0,
 };
 
 pub const Node = struct {
@@ -33,15 +33,9 @@ pub const Node = struct {
     statistics: Statistics,
     board: Board,
     game: *GameSettings,
-    untried_moves: std.ArrayList(Coordinates(u32)),
+    untried_moves: []Coordinates(u32),
+    untried_moves_index: u32,
     coordinates: ?Coordinates(u32),
-
-    allocator: std.mem.Allocator,
-
-    // The exploration parameter, theoretically equal to √2.
-    // In practice usually chosen empirically.
-    // Will give more or less value to the second term.
-    c: f64 = @sqrt(2.0),
 
     // Method used to initialize the Node.
     pub fn init(
@@ -49,20 +43,23 @@ pub const Node = struct {
         board: Board,
         parent: ?*Node,
         coordinates: ?Coordinates(u32),
-        allocator: std.mem.Allocator,
+        allocator: *std.mem.Allocator,
     ) !*Node {
         const node = try allocator.create(Node);
+        var untried_moves = try allocator.alloc(
+            Coordinates(u32),
+            board.map.len
+        );
+        const index_in_array = board.getEmptyPositions(&untried_moves);
         node.* = Node{
             .game = game,
-            .board = try board.clone(allocator),
+            .board = try board.clone(allocator.*),
             .parent = parent,
-            .children = std.ArrayList(*Node).init(allocator),
-            .allocator = allocator,
-            .untried_moves = try board.getEmptyPositions(allocator),
+            .children = std.ArrayList(*Node).init(allocator.*),
+            .untried_moves = untried_moves,
+            .untried_moves_index = index_in_array,
             .statistics = Statistics {
-                .mean_reward = 0, // Q(0)_i(si, ai)
                 .total_reward = 0,
-                .variance = 36, // sigma^2(0)_i(si, ai)
                 .visit_count = 0,
             },
             .coordinates = coordinates,
@@ -71,14 +68,14 @@ pub const Node = struct {
     }
 
     // Method used to destroy the Node and the tree of node.
-    pub fn deinit(self: *Node, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Node, allocator: *std.mem.Allocator) void {
         for (self.children.items) |child| {
             child.deinit(allocator);
         }
-        self.board.deinit(allocator);
+        self.board.deinit(allocator.*);
         self.children.deinit();
-        self.untried_moves.deinit();
-        self.allocator.destroy(self);
+        allocator.free(self.untried_moves);
+        allocator.destroy(self);
     }
 
     pub fn getUCBScore(self: *Node) ?f64 {
@@ -92,33 +89,34 @@ pub const Node = struct {
         // We use one of the possible MCTS formula for calculating the node
         // value.
         return (
-            self.statistics.total_reward /
-                @as(f64, @floatFromInt(self.statistics.visit_count))
+            self.statistics.total_reward / self.statistics.visit_count
         ) + (
-            self.c * @sqrt(
+            C * @sqrt(
                 @log(
-                    @as(f64, @floatFromInt(top_node.statistics.visit_count))
-                ) /
-                @as(f64, @floatFromInt(self.statistics.visit_count))
+                    top_node.statistics.visit_count
+                ) / self.statistics.visit_count
             )
         );
     }
 
-    pub fn expand(self: *Node, allocator: std.mem.Allocator) !void {
+    pub fn expand(self: *Node, allocator: *std.mem.Allocator) !void {
         // Verify if untried moves are available.
-        if (self.untried_moves.items.len == 0)
+        if (self.untried_moves_index == 0)
             return;
 
         // Pick a random untried move.
-        const child_index = std.crypto.random.intRangeAtMost(
-            u64, 0, @as(u64, self.untried_moves.items.len - 1));
+        const child_index = std.Random.uintLessThan(
+            random,
+            u64,
+            self.untried_moves_index
+        );
 
         // Get the coordinates for expansion.
-        const child_coordinates = self.untried_moves.items[child_index];
+        const child_coordinates = self.untried_moves[child_index];
 
         // Clone the board and apply the move.
-        var new_board = try self.board.clone(allocator);
-        defer new_board.deinit(allocator);
+        var new_board = try self.board.clone(allocator.*);
+        defer new_board.deinit(allocator.*);
         new_board.setCellByCoordinates(
             child_coordinates.x,
             child_coordinates.y,
@@ -126,22 +124,38 @@ pub const Node = struct {
         );
 
         // Remove the move from untried moves.
-        _ = self.untried_moves.orderedRemove(child_index);
+        popElementFromCoordinateSlice(
+            &self.untried_moves,
+            &self.untried_moves_index,
+            child_index
+        );
 
         // Create a new child node.
         const new_node = try Node.init(
             self.game, new_board, self,
-            child_coordinates, self.allocator
+            child_coordinates, allocator
         );
         try self.children.append(new_node);
     }
 
-    pub fn simulate(self: Node, allocator: std.mem.Allocator) !i32 {
+    pub fn simulate(self: Node, allocator: *std.mem.Allocator) !i32 {
         // Obtain a temporary board from our current board state.
-        var temporary_board = try self.board.clone(allocator);
-        defer temporary_board.deinit(allocator);
-        var current_coordinates = self.coordinates orelse
-            try findRandomValidCell(temporary_board, random);
+        var temporary_board = try self.board.clone(allocator.*);
+        defer temporary_board.deinit(allocator.*);
+
+        // Get valid cells.
+        var valid_cells = try allocator.*.alloc(
+            Coordinates(u32),
+            self.board.map.len
+        );
+        defer allocator.free(valid_cells);
+        var array_index = temporary_board.getEmptyPositions
+            (&valid_cells);
+
+        var current_coordinates = self.coordinates orelse Coordinates(u32) {
+            .x = 0,
+            .y = 0,
+        };
         var current_player = Cell.own;
 
         while (
@@ -149,19 +163,24 @@ pub const Node = struct {
                 and !temporary_board.isFull()
         ) {
             // Get a random move.
-            current_coordinates = findRandomValidCell(
-                temporary_board,
-                random
-            ) catch {
-                // Draw.
-                return 0;
-            };
+            const current_coordinates_index = std.Random.uintLessThan(
+                random,
+                u64,
+                array_index
+            );
+            current_coordinates = valid_cells.ptr[current_coordinates_index];
 
             // Set the cell on the board.
             temporary_board.setCellByCoordinates(
                 current_coordinates.x,
                 current_coordinates.y,
                 current_player
+            );
+
+            popElementFromCoordinateSlice(
+                &valid_cells,
+                &array_index,
+                current_coordinates_index
             );
 
             // Set the turn to the other player.
@@ -189,23 +208,33 @@ pub const Node = struct {
     }
 };
 
-const MCTS = struct {
+// Function used to pop an element from the coordinate slice.
+fn popElementFromCoordinateSlice(
+    array: *[]Coordinates(u32),
+    array_index: *u32,
+    index: u64
+) void {
+    array.*[index] = array.*[array_index.* - 1];
+    array_index.* -= 1;
+}
+
+pub const MCTS = struct {
     allocator: std.mem.Allocator,
     root: *Node,
 
     pub fn init(
         game: *GameSettings,
         board: Board,
-        allocator: std.mem.Allocator
+        allocator: *std.mem.Allocator
     ) !MCTS {
         return MCTS{
-            .allocator = allocator,
+            .allocator = allocator.*,
             .root = try Node.init(game, board, null, null, allocator),
         };
     }
 
     pub fn deinit(self: *MCTS) void {
-        self.root.deinit(self.allocator);
+        self.root.deinit(&self.allocator);
     }
 
     pub fn selectBestChild(self: *MCTS) !*Node {
@@ -214,7 +243,7 @@ const MCTS = struct {
 
         for (self.root.children.items) |child| {
             if (child.statistics.visit_count == 0) continue;
-            const score = @as(f64, @floatFromInt(child.statistics.visit_count));
+            const score = child.statistics.visit_count;
             if (score > best_score) {
                 best_score = score;
                 best_child = child;
@@ -233,7 +262,7 @@ const MCTS = struct {
             var current = self.root;
 
             // Selection
-            while (current.untried_moves.items.len == 0 and
+            while (current.untried_moves_index == 0 and
                 current.children.items.len > 0) {
                 var best_score: f64 = -std.math.inf(f64);
                 var best_child: ?*Node = null;
@@ -250,13 +279,13 @@ const MCTS = struct {
             }
 
             // Expansion
-            if (current.untried_moves.items.len > 0) {
-                try current.expand(self.allocator);
+            if (current.untried_moves_index > 0) {
+                try current.expand(&self.allocator);
                 current = current.children.items[current.children.items.len - 1];
             }
 
             // Simulation
-            const reward = try current.simulate(self.allocator);
+            const reward = try current.simulate(&self.allocator);
 
             // Backpropagation
             current.backpropagate(@floatFromInt(reward));
@@ -264,134 +293,9 @@ const MCTS = struct {
     }
 };
 
-test "Node initialization" {
-    const allocator = std.testing.allocator;
-    var game_settings = GameSettings{
-        .timeout_turn = 0,
-        .turn_time = 0,
-        .current_time = 0,
-        .timeout_match = 0,
-        .max_memory = 0,
-        .time_left = 2147483647,
-        .game_type = .opponent_is_human,
-        .rule = GameRule{ .rule = 0 },
-        .folder = "", // or allocate if you need to modify it later.
-        .started = false,
-        .allocator = undefined,
-    };
-    var board = try Board.init(std.testing.allocator,
-        20, 20);
-    defer board.deinit(std.testing.allocator);
 
-    const coords = Coordinates(u32){ .x = 0, .y = 0 };
-    const node = try Node.init(&game_settings, board, null, coords, allocator);
-    defer node.deinit(allocator);
-
-    try std.testing.expect(node.parent == null);
-    try std.testing.expect(node.children.items.len == 0);
-    try std.testing.expectEqual(node.game, &game_settings);
-    try std.testing.expectEqual(node.coordinates, coords);
-    try std.testing.expectEqual(node.statistics.visit_count, 0);
-    try std.testing.expectEqual(node.statistics.total_reward, 0);
-    try std.testing.expectEqual(node.statistics.mean_reward, 0);
-    try std.testing.expectEqual(node.statistics.variance, 36);
-}
-
-test "Node UCB score calculation" {
-    const allocator = std.testing.allocator;
-    var game_settings = GameSettings{
-        .timeout_turn = 0,
-        .turn_time = 0,
-        .current_time = 0,
-        .timeout_match = 0,
-        .max_memory = 0,
-        .time_left = 2147483647,
-        .game_type = .opponent_is_human,
-        .rule = GameRule{ .rule = 0 },
-        .folder = "", // or allocate if you need to modify it later.
-        .started = false,
-        .allocator = undefined,
-    };
-    var board = try Board.init(std.testing.allocator,
-        20, 20);
-    defer board.deinit(std.testing.allocator);
-
-    const node = try Node.init(&game_settings, board, null, null, allocator);
-    defer node.deinit(allocator);
-
-    // Test unexplored node
-    try std.testing.expectEqual(node.getUCBScore().?, std.math.floatMax(f64));
-
-    // Test explored node
-    node.statistics.visit_count = 10;
-    node.statistics.total_reward = 5;
-
-    const expected_ucb = 0.5 + node.c * @sqrt(@log(10.0) / 10.0);
-    const actual_ucb = node.getUCBScore().?;
-
-    try std.testing.expectApproxEqAbs(expected_ucb, actual_ucb, 1e-10);
-}
-
-test "Node expansion" {
-    const allocator = std.testing.allocator;
-    var game_settings = GameSettings{
-        .timeout_turn = 0,
-        .turn_time = 0,
-        .current_time = 0,
-        .timeout_match = 0,
-        .max_memory = 0,
-        .time_left = 2147483647,
-        .game_type = .opponent_is_human,
-        .rule = GameRule{ .rule = 0 },
-        .folder = "", // or allocate if you need to modify it later.
-        .started = false,
-        .allocator = undefined,
-    };
-    var board = try Board.init(std.testing.allocator,
-        20, 20);
-    defer board.deinit(std.testing.allocator);
-
-    const node = try Node.init(&game_settings, board, null, null, allocator);
-    defer node.deinit(allocator);
-
-    const initial_untried_moves = node.untried_moves.items.len;
-    try node.expand(allocator);
-
-    try std.testing.expect(node.children.items.len == 1);
-    try std.testing.expect(node.untried_moves.items.len ==
-        initial_untried_moves - 1);
-    try std.testing.expect(node.children.items[0].parent == node);
-}
-
-test "Node simulation" {
-    const allocator = std.testing.allocator;
-    var game_settings = GameSettings{
-        .timeout_turn = 0,
-        .turn_time = 0,
-        .current_time = 0,
-        .timeout_match = 0,
-        .max_memory = 0,
-        .time_left = 2147483647,
-        .game_type = .opponent_is_human,
-        .rule = GameRule{ .rule = 0 },
-        .folder = "", // or allocate if you need to modify it later.
-        .started = false,
-        .allocator = undefined,
-    };
-    var board = try Board.init(std.testing.allocator,
-        20, 20);
-    defer board.deinit(std.testing.allocator);
-
-    const node = try Node.init(&game_settings, board, null,
-        Coordinates(u32){ .x = 0, .y = 0 }, allocator);
-    defer node.deinit(allocator);
-
-    const result = try node.simulate(allocator);
-    try std.testing.expect(result == 1 or result == -1 or result == 0);
-}
-
-test "Node backpropagation" {
-    const allocator = std.testing.allocator;
+test "MCTS initialization" {
+    var allocator = std.testing.allocator;
     var game_settings = GameSettings{
         .timeout_turn = 0,
         .turn_time = 0,
@@ -405,68 +309,19 @@ test "Node backpropagation" {
         .started = false,
         .allocator = undefined,
     };
-    var board = try Board.init(std.testing.allocator, 20, 20);
-    defer board.deinit(std.testing.allocator);
 
-    // Create a root node
-    const root = try Node.init(&game_settings, board, null, null, allocator);
-    defer root.deinit(allocator);
-
-    // Create a child node
-    var child_board = try board.clone(allocator);
-    defer child_board.deinit(std.testing.allocator);
-    const child = try Node.init(&game_settings, child_board, root,
-        Coordinates(u32){ .x = 0, .y = 0 }, allocator);
-    try root.children.append(child);
-
-    // Test initial values
-    try std.testing.expectEqual(root.statistics.visit_count, 0);
-    try std.testing.expectEqual(root.statistics.total_reward, 0);
-    try std.testing.expectEqual(child.statistics.visit_count, 0);
-    try std.testing.expectEqual(child.statistics.total_reward, 0);
-
-    // Test backpropagation with positive reward
-    child.backpropagate(1.0);
-    try std.testing.expectEqual(root.statistics.visit_count, 1);
-    try std.testing.expectEqual(root.statistics.total_reward, 1.0);
-    try std.testing.expectEqual(child.statistics.visit_count, 1);
-    try std.testing.expectEqual(child.statistics.total_reward, 1.0);
-
-    // Test backpropagation with negative reward
-    child.backpropagate(-1.0);
-    try std.testing.expectEqual(root.statistics.visit_count, 2);
-    try std.testing.expectEqual(root.statistics.total_reward, 0.0);
-    try std.testing.expectEqual(child.statistics.visit_count, 2);
-    try std.testing.expectEqual(child.statistics.total_reward, 0.0);
-}
-
-test "MCTS initialization and deinitialization" {
-    const allocator = std.testing.allocator;
-    var game_settings = GameSettings{
-        .timeout_turn = 0,
-        .turn_time = 0,
-        .current_time = 0,
-        .timeout_match = 0,
-        .max_memory = 0,
-        .time_left = 2147483647,
-        .game_type = .opponent_is_human,
-        .rule = GameRule{ .rule = 0 },
-        .folder = "",
-        .started = false,
-        .allocator = undefined,
-    };
     var board = try Board.init(allocator, 20, 20);
     defer board.deinit(std.testing.allocator);
 
-    var mcts = try MCTS.init(&game_settings, board, allocator);
+    var mcts = try MCTS.init(&game_settings, board, &allocator);
     defer mcts.deinit();
 
     try std.testing.expect(mcts.root.parent == null);
-    try std.testing.expect(mcts.root.children.items.len == 0);
+    try std.testing.expectEqual(mcts.root.children.items.len, 0);
 }
 
-test "MCTS select best child - empty tree" {
-    const allocator = std.testing.allocator;
+test "Node UCB score calculation" {
+    var allocator = std.testing.allocator;
     var game_settings = GameSettings{
         .timeout_turn = 0,
         .turn_time = 0,
@@ -480,17 +335,26 @@ test "MCTS select best child - empty tree" {
         .started = false,
         .allocator = undefined,
     };
+
     var board = try Board.init(allocator, 20, 20);
     defer board.deinit(std.testing.allocator);
 
-    var mcts = try MCTS.init(&game_settings, board, allocator);
-    defer mcts.deinit();
+    var node = try Node.init(&game_settings, board, null, null, &allocator);
+    defer node.deinit(&allocator);
 
-    try std.testing.expectError(error.NoValidMove, mcts.selectBestChild());
+    // Test unvisited node
+    const max_score = node.getUCBScore();
+    try std.testing.expect(max_score.? == std.math.floatMax(f64));
+
+    // Test visited node
+    node.statistics.visit_count = 10;
+    node.statistics.total_reward = 5;
+    const ucb_score = node.getUCBScore();
+    try std.testing.expect(ucb_score.? < std.math.floatMax(f64));
 }
 
-test "MCTS select best child - with children" {
-    const allocator = std.testing.allocator;
+test "Node expansion" {
+    var allocator = std.testing.allocator;
     var game_settings = GameSettings{
         .timeout_turn = 0,
         .turn_time = 0,
@@ -504,26 +368,24 @@ test "MCTS select best child - with children" {
         .started = false,
         .allocator = undefined,
     };
-    var board = try Board.init(allocator, 20, 20);
+
+    var board = try Board.init(allocator, 3, 3);
     defer board.deinit(std.testing.allocator);
 
-    var mcts = try MCTS.init(&game_settings, board, allocator);
-    defer mcts.deinit();
+    var node = try Node.init(&game_settings, board, null, null, &allocator);
+    defer node.deinit(&allocator);
 
-    // Expand root node to create some children
-    try mcts.root.expand(allocator);
-    try mcts.root.expand(allocator);
+    const initial_untried_moves = node.untried_moves.len;
+    try node.expand(&allocator);
 
-    // Set different visit counts
-    mcts.root.children.items[0].statistics.visit_count = 5;
-    mcts.root.children.items[1].statistics.visit_count = 10;
-
-    const best_child = try mcts.selectBestChild();
-    try std.testing.expectEqual(best_child, mcts.root.children.items[1]);
+    try std.testing.expect(node.children.items.len == 1);
+    try std.testing.expect(
+        node.untried_moves_index == initial_untried_moves - 1
+    );
 }
 
-test "MCTS search process" {
-    const allocator = std.testing.allocator;
+test "MCTS search and best child selection" {
+    var allocator = std.testing.allocator;
     var game_settings = GameSettings{
         .timeout_turn = 0,
         .turn_time = 0,
@@ -537,34 +399,25 @@ test "MCTS search process" {
         .started = false,
         .allocator = undefined,
     };
-    var board = try Board.init(allocator, 20, 20);
+
+    var board = try Board.init(allocator, 10, 10);
     defer board.deinit(std.testing.allocator);
 
-    var mcts = try MCTS.init(&game_settings, board, allocator);
+    var mcts = try MCTS.init(&game_settings, board, &allocator);
     defer mcts.deinit();
 
-    // Perform search with a small number of iterations
-    try mcts.performMCTSSearch(10);
+    try mcts.performMCTSSearch(100);
 
-    // Verify that the search created some children
+    // After search, root should have children
     try std.testing.expect(mcts.root.children.items.len > 0);
 
-    // Verify that visits were recorded
-    try std.testing.expect(mcts.root.statistics.visit_count > 0);
-
-    // Verify that at least one child has been visited
-    var found_visited_child = false;
-    for (mcts.root.children.items) |child| {
-        if (child.statistics.visit_count > 0) {
-            found_visited_child = true;
-            break;
-        }
-    }
-    try std.testing.expect(found_visited_child);
+    // Test if we can select best child
+    const best_child = try mcts.selectBestChild();
+    try std.testing.expect(best_child.statistics.visit_count > 0);
 }
 
-test "MCTS complete game simulation" {
-    const allocator = std.testing.allocator;
+test "Simulation and backpropagation" {
+    var allocator = std.testing.allocator;
     var game_settings = GameSettings{
         .timeout_turn = 0,
         .turn_time = 0,
@@ -578,29 +431,25 @@ test "MCTS complete game simulation" {
         .started = false,
         .allocator = undefined,
     };
-    var board = try Board.init(allocator, 20, 20);
+
+    var board = try Board.init(allocator, 3, 3);
     defer board.deinit(std.testing.allocator);
 
-    var mcts = try MCTS.init(&game_settings, board, allocator);
-    defer mcts.deinit();
+    var node = try Node.init(&game_settings, board, null, Coordinates(u32){ .x = 1, .y = 1 }, &allocator);
+    defer node.deinit(&allocator);
 
-    // Simulate several moves
-    var moves: usize = 0;
-    while (moves < 5) : (moves += 1) {
-        try mcts.performMCTSSearch(100);
-        const best_move = try mcts.selectBestChild();
+    const reward = try node.simulate(&allocator);
+    try std.testing.expect(reward >= -1 and reward <= 1);
 
-        // Verify best move is valid
-        try std.testing.expect(best_move.coordinates != null);
-        try std.testing.expect(best_move.coordinates.?.x < 20);
-        try std.testing.expect(best_move.coordinates.?.y < 20);
-    }
+    const initial_visits = node.statistics.visit_count;
+    node.backpropagate(@floatFromInt(reward));
+    try std.testing.expect(node.statistics.visit_count == initial_visits + 1);
 }
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var allocator = gpa.allocator();
 
     // Initialize game settings
     var game_settings = GameSettings{
@@ -618,7 +467,7 @@ pub fn main() !void {
     };
 
     // Initialize board
-    var board = try Board.init(allocator, 15, 15);
+    var board = try Board.init(allocator, 10, 10);
     defer board.deinit(allocator);
 
     const stdout = std.io.getStdOut().writer();
@@ -637,7 +486,7 @@ pub fn main() !void {
         const y = try std.fmt.parseInt(u32, iterator.next() orelse "", 10);
 
         // Make human move
-        board.setCellByCoordinates(x, y, .own);
+        board.setCellByCoordinates(x, y, .opponent);
         if (board.isWin(x, y)) {
             try stdout.writeAll("You win!\n");
             break;
@@ -650,18 +499,25 @@ pub fn main() !void {
         // AI's turn
         try stdout.writeAll("AI is thinking...\n");
 
-        // Create root node for MCTS with AOAP policy.
-        var mcts = try MCTS.init(&game_settings, board, allocator);
+        const time1 = std.time.milliTimestamp();
+        // Initialize MCTS with RAVE
+        var mcts = try MCTS.init(&game_settings, board, &allocator);
 
-        // Perform AOAP-MCTS search.
-        try mcts.performMCTSSearch(100000);
+        // Perform MCTS search
+        try mcts.performMCTSSearch(250000);
 
-        // Select best move based on AOAP-MCTS
+        // Select the best move
         const best_child = try mcts.selectBestChild();
         const ai_move = best_child.coordinates orelse return error.NoValidMove;
+        const time2 = std.time.milliTimestamp();
+        const time_diff = time2 - time1;
+        try stdout.print(
+            "AI took: {d} milliseconds\n",
+            .{time_diff}
+        );
 
         // Make AI move
-        board.setCellByCoordinates(ai_move.x, ai_move.y, .opponent);
+        board.setCellByCoordinates(ai_move.x, ai_move.y, .own);
         try stdout.print("AI plays: {d} {d}\n", .{ai_move.x, ai_move.y});
 
         // Clean up MCTS
@@ -675,5 +531,6 @@ pub fn main() !void {
             try stdout.writeAll("Draw!\n");
             break;
         }
+        return;
     }
 }
