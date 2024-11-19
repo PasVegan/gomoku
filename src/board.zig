@@ -105,6 +105,68 @@ pub const Board = struct {
         return y * self.width + x;
     }
 
+    /// Check if there's a win at the given position by checking all directions
+    /// Returns true if there's a win, false otherwise.
+    pub fn addWinningLine(board: *Board, x: u32, y: u32) !bool {
+        const directions = [_][2]i32{
+            [_]i32{ 1, 0 },   // horizontal
+            [_]i32{ 0, 1 },   // vertical
+            [_]i32{ 1, 1 },   // diagonal right
+            [_]i32{ 1, -1 },  // diagonal left
+        };
+
+        const current_cell = board.getCellByCoordinates(x, y);
+        if (current_cell == Cell.empty) return false;
+
+        // Helper function to check if coordinates are valid.
+        const isValidPosition = struct {
+            fn check(brd: *Board, pos_x: i32, pos_y: i32) bool {
+                return pos_x >= 0 and pos_y >= 0 and
+                    pos_x < brd.width and pos_y < brd.height;
+            }
+        }.check;
+
+        var victory_line = try std.BoundedArray(Coordinates, 5).init(5);
+
+        inline for (directions) |dir| {
+            var count: i32 = 1;
+
+            // Reset the victory line
+            victory_line.clear();
+            // Add the initial position
+            try victory_line.append(Coordinates{ .x = x, .y = y });
+
+            // Check both directions in a single loop.
+            inline for ([_]i32{1, -1}) |multiplier| {
+                inline for ([_]i32{1, 2, 3, 4}) |i| {
+                    const new_x = @as(i32, @intCast(x)) + (dir[0] * i * multiplier);
+                    const new_y = @as(i32, @intCast(y)) + (dir[1] * i * multiplier);
+
+                    if (!isValidPosition(board, new_x, new_y))
+                        break;
+
+                    const check_x = @as(u32, @intCast(new_x));
+                    const check_y = @as(u32, @intCast(new_y));
+                    if (board.getCellByCoordinates(check_x, check_y) != current_cell)
+                        break;
+                    try victory_line.append(Coordinates{ .x = check_x, .y = check_y });
+                    count += 1;
+                }
+            }
+
+            if (count >= 5) {
+                // Mark the winning line
+                for (victory_line.constSlice()) |coord| {
+                    std.debug.print("Winning line at ({d}, {d})\n", .{coord.x, coord.y});
+                    board.setCellByCoordinates(coord.x, coord.y, Cell.winning_line_or_forbidden);
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     pub fn format(
         self: Board,
         comptime fmt: []const u8,
