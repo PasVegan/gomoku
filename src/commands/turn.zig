@@ -4,6 +4,28 @@ const board = @import("../board.zig");
 const main = @import("../main.zig");
 const ai = @import("../ai.zig");
 
+// Error set
+pub const PlayError = error {
+    OUTSIDE,
+    OCCUPIED,
+};
+
+pub fn setEnnemyStone(x: u32, y: u32) PlayError!void {
+    if (board.game_board.isCoordinatesOutside(x, y)) {
+        return PlayError.OUTSIDE;
+    }
+    if (board.game_board.getCellByCoordinates(x, y) != board.Cell.empty) {
+        return PlayError.OCCUPIED;
+    }
+    board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
+}
+
+pub fn AIPlay() [2]u16 {
+    const empty_cell = ai.findBestMove(&board.game_board);
+    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
+    return .{empty_cell.col, empty_cell.row};
+}
+
 pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
     if (msg.len < 8 or msg[4] != ' ') { // at least "TURN 5,5" for example
         try message.sendLogC(.ERROR, "wrong TURN command format", writer);
@@ -24,20 +46,18 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
             .{err, msg[comma_pos.? + 1..]}, writer);
         return;
     };
-    if (board.game_board.isCoordinatesOutside(x, y)) {
-        try message.sendLogC(.ERROR, "coordinates are outside the board", writer);
-        return;
-    }
-    if (board.game_board.getCellByCoordinates(x, y) != board.Cell.empty) {
-        try message.sendLogC(.ERROR, "cell is not empty", writer);
-        return;
-    }
-    board.game_board.setCellByCoordinates(x, y, board.Cell.opponent);
 
-    const empty_cell = ai.findBestMove(&board.game_board);
-    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
+    setEnnemyStone(x, y) catch |err| {
+        switch (err) {
+            PlayError.OUTSIDE => try message.sendLogC(.ERROR, "coordinates are outside the board", writer),
+            PlayError.OCCUPIED => try message.sendLogC(.ERROR, "cell is not empty", writer),
+        }
+        return;
+    };
 
-    try message.sendMessageF("{d},{d}", .{empty_cell.col, empty_cell.row}, writer);
+    const ai_move = AIPlay();
+
+    try message.sendMessageF("{d},{d}", .{ai_move[0], ai_move[1]}, writer);
 }
 
 test "handleTurn command valid input" {
