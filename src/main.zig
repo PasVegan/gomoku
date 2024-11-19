@@ -4,6 +4,7 @@ const message = @import("message.zig");
 const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
 const io = @import("io.zig");
+const build_options = @import("build_options");
 
 const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
@@ -76,15 +77,20 @@ pub fn main() !void {
     // Initialize the board.
     board.game_board = board.Board.init(
         allocator,
-        width, height
+        height, width
     ) catch |err| { return err; };
     defer board.game_board.deinit(allocator);
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
-    while (!should_stop) {
-        try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
-        try handleCommand(read_buffer.slice(), stdout.any());
+    if (build_options.GUI) {
+        const gui = @import("gui.zig");
+        try gui.run_gui();
+    } else {
+        while (!should_stop) {
+            try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
+            try handleCommand(read_buffer.slice(), stdout.any());
+        }
     }
 }
 
