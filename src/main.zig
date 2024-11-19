@@ -77,13 +77,11 @@ pub fn main() !void {
     // Initialize the board.
     board.game_board = board.Board.init(
         allocator,
-        width, height
+        height, width
     ) catch |err| { return err; };
     defer board.game_board.deinit(allocator);
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
-
-    std.debug.print("Gomoku AI\n", .{});
 
     if (build_options.GUI) {
         const gui = @import("gui.zig");
