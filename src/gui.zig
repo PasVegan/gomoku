@@ -132,7 +132,7 @@ fn onDraw(widget: *capy.Canvas, ctx: *capy.DrawContext) !void {
     const height = @as(i32, @intCast(widget.getHeight()));
 
     // Draw background
-    ctx.setColor(0.862745098039, 0.701960784314, 0.360784313725);
+    ctx.setColor(0.862745098039, 0.701960784314, 0.360784313725); // Light brown
     ctx.rectangle(0, 0, @as(u32, @intCast(width)), @as(u32, @intCast(height)));
     ctx.fill();
 
