@@ -233,53 +233,6 @@ pub const Board = struct {
         return false;
     }
 
-    /// Method used to display the board.
-    pub fn display(self: Board, writer: anytype) !void {
-        // Print column numbers
-        try writer.writeAll("   "); // Padding for row numbers
-        for (0..self.width) |x| {
-            if (x + 1 == self.width) {
-                if (x < 10) {
-                    try writer.print(" {d}", .{x});
-                } else {
-                    try writer.print("{d}", .{x});
-                }
-            } else {
-                if (x < 10) {
-                    try writer.print(" {d} ", .{x});
-                } else {
-                    try writer.print("{d} ", .{x});
-                }
-            }
-        }
-        try writer.writeAll("\n");
-
-        // Print the board with row numbers
-        for (0..self.height) |y| {
-            if (y < 10) {
-                try writer.print(" {d} ", .{y});
-            } else {
-                try writer.print("{d} ", .{y});
-            }
-
-            for (0..self.width) |x| {
-                const cell = self.getCellByCoordinates(@intCast(x), @intCast(y));
-                const symbol = switch (cell) {
-                    .empty => ".",
-                    .own => "O",
-                    .opponent => "X",
-                    .winning_line_or_forbidden => "#",
-                };
-                if (x + 1 == self.width) {
-                    try writer.print(" {s}", .{symbol});
-                } else {
-                    try writer.print(" {s} ", .{symbol});
-                }
-            }
-            try writer.writeAll("\n");
-        }
-    }
-
     /// Check if there's a win at the given position by checking all directions
     /// Returns true if there's a win, false otherwise.
     pub fn addWinningLine(board: *Board, x: u32, y: u32) !bool {
@@ -608,57 +561,4 @@ test "clone method allocates separate memory" {
     // Check that the original and cloned board map do not share the same
     // pointer.
     try std.testing.expect(cloned_board.map.ptr != original_board.map.ptr);
-}
-
-test "display board with various cell states" {
-    const height = 5;
-    const width = 5;
-    var board = try Board.init(std.testing.allocator, height, width);
-    defer board.deinit(std.testing.allocator);
-
-    // Set up some test cells
-    board.setCellByCoordinates(1, 1, Cell.own);
-    board.setCellByCoordinates(2, 2, Cell.opponent);
-    board.setCellByCoordinates(3, 3, Cell.winning_line_or_forbidden);
-
-    var output = std.ArrayList(u8).init(std.testing.allocator);
-    defer output.deinit();
-
-    try board.display(output.writer());
-
-    const expected =
-        \\    0  1  2  3  4
-        \\ 0  .  .  .  .  .
-        \\ 1  .  O  .  .  .
-        \\ 2  .  .  X  .  .
-        \\ 3  .  .  .  #  .
-        \\ 4  .  .  .  .  .
-        \\
-    ;
-
-    try std.testing.expectEqualStrings(expected, output.items);
-}
-
-test "display larger board" {
-    const height = 10;
-    const width = 10;
-    var board = try Board.init(std.testing.allocator, height, width);
-    defer board.deinit(std.testing.allocator);
-
-    var output = std.ArrayList(u8).init(std.testing.allocator);
-    defer output.deinit();
-
-    try board.display(output.writer());
-
-    // Verify first line contains correct column numbers
-    const first_line = "    0  1  2  3  4  5  6  7  8  9\n";
-    try std.testing.expect(std.mem.startsWith(u8, output.items, first_line));
-
-    // Verify board dimensions
-    var line_count: usize = 0;
-    var lines = std.mem.splitScalar(u8, output.items, '\n');
-    while (lines.next()) |_| {
-        line_count += 1;
-    }
-    try std.testing.expectEqual(height + 2, line_count); // +2 for column numbers and trailing newline
 }

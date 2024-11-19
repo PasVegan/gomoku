@@ -105,8 +105,7 @@ pub const Node = struct {
             return;
 
         // Pick a random untried move.
-        const child_index = std.Random.uintLessThan(
-            random,
+        const child_index = random.uintLessThan(
             u64,
             self.untried_moves_index
         );
@@ -163,8 +162,7 @@ pub const Node = struct {
                 and !temporary_board.isFull()
         ) {
             // Get a random move.
-            const current_coordinates_index = std.Random.uintLessThan(
-                random,
+            const current_coordinates_index = random.uintLessThan(
                 u64,
                 array_index
             );
@@ -475,7 +473,7 @@ pub fn main() !void {
 
     while (true) {
         // Display board
-        try board.display(stdout);
+        try stdout.print("\n{}", .{board});
 
         // Human's turn
         try stdout.writeAll("Your turn (x y): ");
