@@ -4,6 +4,7 @@ const message = @import("message.zig");
 const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
 const io = @import("io.zig");
+const build_options = @import("build_options");
 
 const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
@@ -82,9 +83,16 @@ pub fn main() !void {
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
-    while (!should_stop) {
-        try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
-        try handleCommand(read_buffer.slice(), stdout.any());
+    std.debug.print("Gomoku AI\n", .{});
+
+    if (build_options.GUI) {
+        const gui = @import("gui.zig");
+        try gui.run_gui();
+    } else {
+        while (!should_stop) {
+            try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
+            try handleCommand(read_buffer.slice(), stdout.any());
+        }
     }
 }
 
