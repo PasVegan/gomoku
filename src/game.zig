@@ -17,8 +17,6 @@ pub var gameSettings = GameSettings{
     .allocator = undefined,
 };
 
-
-
 /// Enumeration representing the game types.
 pub const GameType = enum(u8) {
     opponent_is_human = 0, // The opponent is an human.

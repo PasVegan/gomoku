@@ -36,7 +36,7 @@ test "handleStart command valid input" {
     try std.testing.expectEqualStrings("OK\n", list.items);
     try std.testing.expectEqual(10, main.width);
     try std.testing.expectEqual(10, main.height);
-    board.game_board.deinit(main.allocator);
+    board.game_board.deinit(std.testing.allocator);
 }
 
 test "handleStart command invalid input" {
