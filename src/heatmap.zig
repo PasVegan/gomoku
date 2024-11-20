@@ -4,6 +4,9 @@ const GameContext = @import("game_context.zig").GameContext;
 const Cell = @import("board.zig").Cell;
 const Board = @import("board.zig").Board;
 
+/// Width of dilations for heatmap.
+const MAX_DILATIONS = 5;
+
 /// # Structure representing the data of a cell.
 /// - Attributes:
 ///     - cell: Represent the cell type.
@@ -63,6 +66,93 @@ const HeatMap = struct {
         map_allocator.free(self.map);
     }
 
+    /// Clone the current HeatMap with padding
+    /// - Parameters:
+    ///     - allocator: The allocator to use for the new map
+    ///     - padding: Amount of padding to add on each side
+    /// - Returns:
+    ///     - A new HeatMap with padding
+    pub fn cloneWithPadding(
+        self: HeatMap,
+        allocator: std.mem.Allocator,
+        padding: u32
+    ) !ReshapedHeatmap {
+        const new_width = self.width + (padding * 2);
+        const new_height = self.height + (padding * 2);
+
+        var new_map = try HeatMap.init(allocator, new_height, new_width);
+
+        // Copy the original data to the padded position
+        var y: u32 = 0;
+        while (y < self.height) : (y += 1) {
+            var x: u32 = 0;
+            while (x < self.width) : (x += 1) {
+                const old_idx = self.coordinatesToIndex(x, y);
+                const new_idx = new_map.coordinatesToIndex(x + padding, y + padding);
+                new_map.map[new_idx] = self.map[old_idx];
+            }
+        }
+
+        return ReshapedHeatmap {
+            .heatmap = new_map,
+            .original_height = self.height,
+            .original_width = self.width,
+        };
+    }
+
+    /// Get a shaped subset of the current HeatMap
+    /// - Parameters:
+    ///     - allocator: The allocator to use for the new map
+    ///     - new_width: Desired width of the new map
+    ///     - new_height: Desired height of the new map
+    /// - Returns:
+    ///     - A new HeatMap with the specified dimensions, centered on the original
+    pub fn getShape(
+        self: HeatMap,
+        allocator: std.mem.Allocator,
+        new_width: u32,
+        new_height: u32
+    ) !ReshapedHeatmap {
+        if (new_width > self.width or new_height > self.height) {
+            return error.ShapeTooLarge;
+        }
+
+        var new_map = try HeatMap.init(allocator, new_height, new_width);
+
+        const start_x = (self.width - new_width) / 2;
+        const start_y = (self.height - new_height) / 2;
+
+        var y: u32 = 0;
+        while (y < new_height) : (y += 1) {
+            var x: u32 = 0;
+            while (x < new_width) : (x += 1) {
+                const old_idx = self.coordinatesToIndex(start_x + x, start_y + y);
+                const new_idx = new_map.coordinatesToIndex(x, y);
+                new_map.map[new_idx] = self.map[old_idx];
+            }
+        }
+
+        return ReshapedHeatmap {
+            .heatmap = new_map,
+            .original_height = self.height,
+            .original_width = self.width,
+        };
+    }
+
+    /// Clone the current HeatMap
+    /// - Parameters:
+    ///     - allocator: The allocator to use for the new map
+    /// - Returns:
+    ///     - A new HeatMap with the same contents
+    pub fn clone(
+        self: HeatMap,
+        allocator: std.mem.Allocator,
+    ) !HeatMap {
+        const new_map = try HeatMap.init(allocator, self.height, self.width);
+        @memcpy(new_map.map, self.map);
+        return new_map;
+    }
+
     /// # Method used to obtain a index from coordinates.
     /// - Parameters:
     ///     - self: The current HeatMap.
@@ -120,6 +210,25 @@ const HeatMap = struct {
     }
 };
 
+pub const ReshapedHeatmap = struct {
+    heatmap: HeatMap,
+    original_height: u32,
+    original_width: u32,
+
+    // pub fn dilateWithValue(
+    //     self: *ReshapedHeatmap,
+    //     kernel: []f32,
+    //     kernel_height: u32,
+    //     kernel_width: u32,
+    // ) void {
+    //     for (1..self.heatmap.width - 1) |y| {
+    //         for (1..self.heatmap.height - 1) |x| {
+    //
+    //         }
+    //     }
+    // }
+};
+
 fn getHiglightWidthHeight(size: u32) ?u32 {
     if (size < 10) {
         return null;
@@ -164,6 +273,67 @@ fn getMaxHiglightZone(board: Board) ?Zone {
 //     if (board.width >= 10)
 // }
 
+/// Function used to obtain the distance between 2 coos.
+fn getDistance(point1: Coordinates, point2: Coordinates) u32 {
+    const dx = @abs(
+        @as(i32, @intCast(point1.x)) -
+        @as(i32, @intCast(point2.x))
+    );
+    const dy = @abs(
+        @as(i32, @intCast(point1.y)) -
+        @as(i32, @intCast(point2.y))
+    );
+
+    // Return the maximum of the two distances
+    return @max(dx, dy);
+}
+
+/// Function used to create a distance kernel.
+fn createDistanceKernel(kernel_size: comptime_int)
+    [kernel_size * kernel_size]u32
+{
+    const center = Coordinates {
+        .x = kernel_size / 2,
+        .y = kernel_size / 2,
+    };
+    var array: [kernel_size * kernel_size]u32 = undefined;
+
+    inline for (0..kernel_size) |x| {
+        inline for (0..kernel_size) |y| {
+            array[y * kernel_size + x] =
+                getDistance(center, Coordinates{
+                    .x = x,
+                    .y = y
+                });
+        }
+    }
+    return array;
+}
+
+/// Function which calculate f(x, max)=(max-x)/max.
+fn calculateInterest(distance: u32, max: u32) f32 {
+    return @as(f32, @floatFromInt((max - distance))) /
+        @as(f32, @floatFromInt(max));
+}
+
+/// Function used to create an interest kernel.
+/// Based on f(x, max)=(max-x)/max
+fn createInterestKernel(
+    kernel_size: comptime_int,
+    distance_kernel: []const u32
+) [kernel_size * kernel_size]f32 {
+    var array: [kernel_size * kernel_size]f32 = undefined;
+    const width = (kernel_size / 2) + 1;
+
+    inline for (0..array.len) |index| {
+        array[index] = calculateInterest(
+            distance_kernel[index],
+            width
+        );
+    }
+    return array;
+}
+
 /// # Function used to have a heatmap of region where it is favorable to play.
 pub fn bestActionHeatmap(
     board: Board,
@@ -183,6 +353,14 @@ pub fn bestActionHeatmap(
     if (higlightMiddleZones != null and context.round < 8) {
         heatmap.applyZone(higlightMiddleZones.?);
     }
+
+    // Create the distance kernel.
+    const distance_kernel = createDistanceKernel(MAX_DILATIONS);
+    _ = distance_kernel;
+
+    // Highlight 5 of width from existing tokens on map.
+    // const paddedHeatmap = heatmap.cloneWithPadding(allocator, MAX_DILATIONS);
+    // _ = paddedHeatmap;
 
     return heatmap;
 }
@@ -380,4 +558,78 @@ test "bestActionHeatmap late game" {
     // Check that center is not highlighted in late game
     const center_idx = heatmap.?.coordinatesToIndex(7, 7);
     try testing.expectEqual(heatmap.?.map[center_idx].importance, 0);
+}
+
+test "getDistance should return correct distances" {
+    const p1 = Coordinates{ .x = 3, .y = 4 };
+    const p2 = Coordinates{ .x = 2, .y = 2 };
+    const p3 = Coordinates{ .x = 3, .y = 2 };
+    const p4 = Coordinates{ .x = 1, .y = 1 };
+
+    // Test horizontal distance
+    try std.testing.expect(getDistance(p1, p2) == 2);
+    // Test vertical distance
+    try std.testing.expect(getDistance(p1, p3) == 2);
+    // Test diagonal distance (max of dx and dy)
+    try std.testing.expect(getDistance(p1, p4) == 3);
+    // Test same point
+    try std.testing.expect(getDistance(p1, p1) == 0);
+}
+
+test "createDistanceKernel should generate correct kernel" {
+    const kernel_size = 5;
+    const kernel = createDistanceKernel(kernel_size);
+
+    // Check the center value
+    try std.testing.expect(kernel[2 * kernel_size + 2] == 0);
+
+    // Check distances to corners
+    try std.testing.expect(kernel[0 * kernel_size + 0] == 2); // Top-left corner
+    try std.testing.expect(kernel[0 * kernel_size + 4] == 2); // Top-right corner
+    try std.testing.expect(kernel[4 * kernel_size + 0] == 2); // Bottom-left corner
+    try std.testing.expect(kernel[4 * kernel_size + 4] == 2); // Bottom-right corner
+
+    // Check distances to edges
+    try std.testing.expect(kernel[0 * kernel_size + 2] == 2); // Top center
+    try std.testing.expect(kernel[4 * kernel_size + 2] == 2); // Bottom center
+    try std.testing.expect(kernel[2 * kernel_size + 0] == 2); // Left center
+    try std.testing.expect(kernel[2 * kernel_size + 4] == 2); // Right center
+
+    // Check some inner distances
+    try std.testing.expect(kernel[1 * kernel_size + 1] == 1);
+    try std.testing.expect(kernel[3 * kernel_size + 3] == 1);
+}
+
+test "calculateInterest basic cases" {
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 1.0),
+        calculateInterest(0, 5),
+        0.0001
+    );
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 0.8),
+        calculateInterest(1, 5),
+        0.0001
+    );
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 0.0),
+        calculateInterest(5, 5),
+        0.0001
+    );
+}
+
+test "createInterestKernel 5x5" {
+    const distance_kernel = createDistanceKernel(5);
+    const interest_kernel = createInterestKernel(5, &distance_kernel);
+    const expected = [_]f32{
+        0.33, 0.33, 0.33, 0.33, 0.33,
+        0.33, 0.66, 0.66, 0.66, 0.33,
+        0.33, 0.66, 1.0, 0.66, 0.33,
+        0.33, 0.66, 0.66, 0.66, 0.33,
+        0.33, 0.33, 0.33, 0.33, 0.33,
+    };
+
+    for (interest_kernel, expected) |actual, exp| {
+        try std.testing.expectApproxEqAbs(exp, actual, 0.01);
+    }
 }
