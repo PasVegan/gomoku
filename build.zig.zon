@@ -26,6 +26,7 @@
         .capy = .{
             .url = "git+https://github.com/capy-ui/capy#6118c0490cfdd17dc1972ea3507505ffc8d31a59",
             .hash = "122082ff9145ea0bed6358236202c8b36bf6b0cafca7e6751f37f0a841d1515582d4",
+            .lazy = true,
         },
     },
     .paths = .{
