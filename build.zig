@@ -31,19 +31,18 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("build_options", opts.createModule());
 
     if (opt_gui orelse false) {
-        const capy_dep = b.dependency("capy", .{
+        if( b.lazyDependency("capy", .{
             .target = target,
             .optimize = optimize,
             .app_name = @as([]const u8, "pbrain-gomoku-ai"),
-        });
-        const capy = capy_dep.module("capy");
-        exe.root_module.addImport("capy", capy);
+        })) |capy_dep| {
+            const capy = capy_dep.module("capy");
+            exe.root_module.addImport("capy", capy);
 
-        const build_capy = @import("capy");
-
-        const run_cmd = try build_capy.runStep(exe, .{ .args = b.args });
-        const run_step = b.step("run", "Run the app");
-        run_step.dependOn(run_cmd);
+            const run_cmd = b.addRunArtifact(exe);
+            const run_step = b.step("run", "Run the app");
+            run_step.dependOn(&run_cmd.step);
+        }
     } else {
         const run_cmd = b.addRunArtifact(exe);
         const run_step = b.step("run", "Run the app");
