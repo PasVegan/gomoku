@@ -5,6 +5,8 @@ const message = @import("../message.zig");
 const main = @import("../main.zig");
 const game = @import("../game.zig");
 const ai = @import("../ai.zig");
+const turn = @import("turn.zig");
+
 
 var stdin = std.io.getStdIn().reader().any();
 
@@ -93,10 +95,11 @@ fn handleBoard (
         );
     }
     // Send coordinates.
-    const empty_cell = ai.findBestMove(&board.game_board);
-    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
-    try message.sendMessageF("{d},{d}", .{empty_cell.col, empty_cell.row}, writer);
-    return;
+    const ai_move = turn.AIPlay();
+
+    // const ai_move = try AIPlayMCTS();
+
+    try message.sendMessageF("{d},{d}", .{ai_move[0], ai_move[1]}, writer);
 }
 
 pub fn handle(_: []const u8, writer: std.io.AnyWriter) !void {
