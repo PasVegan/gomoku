@@ -11,17 +11,15 @@ pub const Threat = struct {
 
 // Evaluates a single direction from a given position for potential threats
 // Returns a score based on the number of consecutive pieces and spaces found
-fn evaluateDirection(current_board: *board.Board, board_coord: Coordinates, comptime direction_coord: [2]i32, comptime player: board.Cell) i32 {
-    const len = current_board.map.len;
-    const width = current_board.width;
+fn evaluateDirection(map: []board.Cell, col: u32, row: u32, dx: i32, dy: i32, comptime player: board.Cell, size: u32) i32 {
     // Determine the opponent's cell type
     const opponent = comptime if (player == board.Cell.own) board.Cell.opponent else board.Cell.own;
 
     @setRuntimeSafety(false);
 
     // Convert board coordinates to integer values for calculations
-    const base_row: i32 = @as(i32, @intCast(board_coord.y));
-    const base_col: i32 = @as(i32, @intCast(board_coord.x));
+    const base_row: i32 = @as(i32, @intCast(row));
+    const base_col: i32 = @as(i32, @intCast(col));
 
     // Track consecutive pieces and empty spaces
     var count: u8 = 1;  // Start at 1 for the current position
@@ -29,17 +27,17 @@ fn evaluateDirection(current_board: *board.Board, board_coord: Coordinates, comp
 
     // Check 4 positions in the given direction
     inline for ([_]i32{1,2,3,4}) |i| {
-        const row_direction = direction_coord[0] * i;
-        const col_direction = direction_coord[1] * i;
+        const row_direction = dx * i;
+        const col_direction = dy * i;
         const newRow = base_row + row_direction;
         const newCol = base_col + col_direction;
-        const index: u32 = @as(u32, @bitCast(newRow)) * width + @as(u32, @bitCast(newCol));
+        const index: u32 = @as(u32, @bitCast(newRow)) * size + @as(u32, @bitCast(newCol));
 
         // Check if position is within board boundaries
-        if (newRow < 0 or newCol < 0 or index >= len)
+        if (newRow < 0 or newCol < 0 or index >= (size * size))
             return 0;
 
-        const cell_content = current_board.map[index];
+        const cell_content = map[index];
         // If opponent's piece found, this direction is blocked
         if (cell_content == opponent)
             return 0;
@@ -61,22 +59,18 @@ fn evaluateDirection(current_board: *board.Board, board_coord: Coordinates, comp
 }
 
 // Evaluates a position by checking all 8 directions
-pub fn evaluateMove(current_board: *board.Board, board_coord: Coordinates, comptime player: board.Cell) i32 {
+pub fn evaluateMove(current_board: []board.Cell, col: u32, row: u32, comptime player: board.Cell, size: u32) i32 {
     var score: i32 = 0;
-    // Define all possible directions to check
-    const directions: [4][2]i32 = comptime .{.{1, 0}, .{0, 1}, .{1, 1}, .{1, -1}}; // Right, down, diagonal directions
-    const n_directions: [4][2]i32 = comptime .{.{-1, 0}, .{0, -1}, .{-1, -1}, .{-1, 1}}; // Left, up, opposite diagonal directions
+    // Evaluate all 8 directions and sum the scores dx = row, dy = col
+    score += evaluateDirection(current_board, col, row, 1, 0, player, size); // bottom
+    score += evaluateDirection(current_board, col, row, 0, 1, player, size); // right
+    score += evaluateDirection(current_board, col, row, 1, 1, player, size); // bottom right
+    score += evaluateDirection(current_board, col, row, 1, -1, player, size); // bottom left
 
-    // Evaluate all 8 directions and sum the scores
-    score += evaluateDirection(current_board, board_coord, directions[0], player);
-    score += evaluateDirection(current_board, board_coord, directions[1], player);
-    score += evaluateDirection(current_board, board_coord, directions[2], player);
-    score += evaluateDirection(current_board, board_coord, directions[3], player);
-
-    score += evaluateDirection(current_board, board_coord, n_directions[0], player);
-    score += evaluateDirection(current_board, board_coord, n_directions[1], player);
-    score += evaluateDirection(current_board, board_coord, n_directions[2], player);
-    score += evaluateDirection(current_board, board_coord, n_directions[3], player);
+    score += evaluateDirection(current_board, col, row, -1, 0, player, size); // top
+    score += evaluateDirection(current_board, col, row, 0, -1, player, size); // left
+    score += evaluateDirection(current_board, col, row, -1, -1, player, size); // top left
+    score += evaluateDirection(current_board, col, row, -1, 1, player, size); // top right
 
     return score;
 }
@@ -87,22 +81,19 @@ fn compareThreatsByScore(_: void, a: Threat, b: Threat) bool {
 }
 
 // Finds all potential threats on the board for a given player
-pub fn findThreats(current_board: *board.Board, threats: []Threat, comptime player: board.Cell) u16 {
-    const width = current_board.width;
-    const height = current_board.height;
+pub fn findThreats(map: []board.Cell, threats: []Threat, comptime player: board.Cell, size: u32) u16 {
     var nb_threats: u16 = 0;
-    const map = current_board.map;
 
     // Scan entire board for empty cells
     var row: u16 = 0;
-    while (row < height) : (row += 1) {
+    while (row < size) : (row += 1) {
         var col: u16 = 0;
-        const row_offset = row * width;
-        while (col < width) : (col += 1) {
+        const row_offset = row * size;
+        while (col < size) : (col += 1) {
             const index = row_offset + col;
             if (map[index] == board.Cell.empty) {
                 // Evaluate empty position
-                const score = evaluateMove(current_board, .{ .x = col, .y = row }, player);
+                const score = evaluateMove(map, col, row, player, size);
                 if (score > 0) {
                     threats[nb_threats] = .{ .row = row, .col = col, .score = score };
                     nb_threats += 1;
@@ -117,25 +108,22 @@ pub fn findThreats(current_board: *board.Board, threats: []Threat, comptime play
 }
 
 // Evaluates the entire board position
-fn evaluatePosition(current_board: *board.Board) i32 {
-    const width = current_board.width;
-    const height = current_board.height;
-    const map = current_board.map;
+fn evaluatePosition(map: []board.Cell, comptime size: u32) i32 {
     var score: i32 = 0;
 
     // Evaluate all pieces on the board
-    var row: u16 = 0;
-    while (row < height) : (row += 1) {
-        var col: u16 = 0;
-        const row_offset = row * width;
-        while (col < width) : (col += 1) {
+    comptime var row: u16 = 0;
+    inline while (row < size) : (row += 1) {
+        comptime var col: u16 = 0;
+        const row_offset = comptime row * size;
+        inline while (col < size) : (col += 1) {
             const cell = map[row_offset + col];
             if (cell != board.Cell.empty) {
                 // Add score for own pieces, subtract for opponent's
                 if (cell == board.Cell.own) {
-                    score += evaluateMove(current_board, .{.x = col, .y = row}, board.Cell.own);
+                    score += evaluateMove(map, col, row, board.Cell.own, size);
                 } else {
-                    score -= evaluateMove(current_board, .{.x = col, .y = row}, board.Cell.opponent);
+                    score -= evaluateMove(map, col, row, board.Cell.opponent, size);
                 }
             }
         }
@@ -144,17 +132,17 @@ fn evaluatePosition(current_board: *board.Board) i32 {
 }
 
 // Minimax algorithm with alpha-beta pruning
-pub fn minimax(current_board: *board.Board, depth: u8, comptime isMaximizing: bool, alpha_in: i32, beta_in: i32) i32 {
+pub fn minimax(map: []board.Cell, depth: u8, comptime isMaximizing: bool, alpha_in: i32, beta_in: i32, comptime size: u32) i32 {
     // Base case: evaluate position when depth is reached
     if (depth == 0) {
-        return evaluatePosition(current_board);
+        return evaluatePosition(map, comptime size);
     }
 
-    var threats: [1024]Threat = undefined;
+    var threats: [size * size]Threat = undefined;
 
     const player = comptime if (isMaximizing) board.Cell.own else board.Cell.opponent;
 
-    const nb_threats = findThreats(current_board, &threats, player);
+    const nb_threats = findThreats(map, &threats, player, comptime size);
 
     if (isMaximizing) {
         // Maximizing player's turn
@@ -162,10 +150,10 @@ pub fn minimax(current_board: *board.Board, depth: u8, comptime isMaximizing: bo
         var alpha = alpha_in;
         var i: u16 = 0;
         while (i < nb_threats): (i += 1) {
-            const index = threats[i].row * current_board.width + threats[i].col;
-            current_board.map[index] = board.Cell.own;
-            const score = minimax(current_board, depth - 1, false, alpha, beta_in);
-            current_board.map[index] = board.Cell.empty;
+            const index = threats[i].row * size + threats[i].col;
+            map[index] = board.Cell.own;
+            const score = minimax(map, depth - 1, false, alpha, beta_in, comptime size);
+            map[index] = board.Cell.empty;
             maxScore = @max(maxScore, score);
             alpha = @max(alpha, score);
             if (beta_in <= alpha) {
@@ -179,10 +167,10 @@ pub fn minimax(current_board: *board.Board, depth: u8, comptime isMaximizing: bo
         var beta = beta_in;
         var i: u16 = 0;
         while (i < nb_threats): (i += 1) {
-            const index = threats[i].row * current_board.width + threats[i].col;
-            current_board.map[index] = board.Cell.opponent;
-            const score = minimax(current_board, depth - 1, true, alpha_in, beta);
-            current_board.map[index] = board.Cell.empty;
+            const index = threats[i].row * size + threats[i].col;
+            map[index] = board.Cell.opponent;
+            const score = minimax(map, depth - 1, true, alpha_in, beta, comptime size);
+            map[index] = board.Cell.empty;
             minScore = @min(minScore, score);
             beta = @min(beta, score);
             if (beta <= alpha_in) {
@@ -194,12 +182,13 @@ pub fn minimax(current_board: *board.Board, depth: u8, comptime isMaximizing: bo
 }
 
 // Finds the best move for the AI using minimax algorithm
-pub fn findBestMove(current_board: *board.Board) Threat {
+pub fn findBestMove(comptime size: comptime_int) Threat {
+    var current_board = &board.game_board;
     var bestScore: i32 = std.math.minInt(i32);
     var bestMove: Threat = Threat{ .row = 0, .col = 0, .score = 0 };
-    var threats: [1024]Threat = undefined;
+    var threats: [size * size]Threat = undefined;
 
-    const nb_threats= findThreats(current_board, &threats, board.Cell.own);
+    const nb_threats = findThreats(current_board.map, &threats, board.Cell.own, comptime size);
 
     // Check for immediate winning moves
     var i: u16 = 0;
@@ -216,7 +205,7 @@ pub fn findBestMove(current_board: *board.Board) Threat {
     i = 0;
     while (i < nb_threats): (i += 1) {
         current_board.setCellByCoordinates(threats[i].col, threats[i].row, board.Cell.own);
-        const score = minimax(current_board, 4 - 1, false, alpha, beta);
+        const score = minimax(current_board.map, 4 - 1, false, alpha, beta, comptime size);
         current_board.setCellByCoordinates(threats[i].col, threats[i].row, board.Cell.empty);
 
         if (score > bestScore) {
@@ -226,4 +215,53 @@ pub fn findBestMove(current_board: *board.Board) Threat {
         alpha = @max(alpha, score);
     }
     return bestMove;
+}
+
+pub fn getBotMove5() Threat {
+    return findBestMove(5);
+}
+pub fn getBotMove6() Threat {
+    return findBestMove(6);
+}
+pub fn getBotMove7() Threat {
+    return findBestMove(7);
+}
+pub fn getBotMove8() Threat {
+    return findBestMove(8);
+}
+pub fn getBotMove9() Threat {
+    return findBestMove(9);
+}
+pub fn getBotMove10() Threat {
+    return findBestMove(10);
+}
+pub fn getBotMove11() Threat {
+    return findBestMove(11);
+}
+pub fn getBotMove12() Threat {
+    return findBestMove(12);
+}
+pub fn getBotMove13() Threat {
+    return findBestMove(13);
+}
+pub fn getBotMove14() Threat {
+    return findBestMove(14);
+}
+pub fn getBotMove15() Threat {
+    return findBestMove(15);
+}
+pub fn getBotMove16() Threat {
+    return findBestMove(16);
+}
+pub fn getBotMove17() Threat {
+    return findBestMove(17);
+}
+pub fn getBotMove18() Threat {
+    return findBestMove(18);
+}
+pub fn getBotMove19() Threat {
+    return findBestMove(19);
+}
+pub fn getBotMove20() Threat {
+    return findBestMove(20);
 }

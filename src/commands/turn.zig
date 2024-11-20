@@ -15,6 +15,32 @@ pub const PlayError = error {
     OCCUPIED,
 };
 
+const AIMapping = *const fn () ai.Threat;
+
+const AIMap: []const AIMapping = &[_]AIMapping{
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    ai.getBotMove5,
+    ai.getBotMove6,
+    ai.getBotMove7,
+    ai.getBotMove8,
+    ai.getBotMove9,
+    ai.getBotMove10,
+    ai.getBotMove11,
+    ai.getBotMove12,
+    ai.getBotMove13,
+    ai.getBotMove14,
+    ai.getBotMove15,
+    ai.getBotMove16,
+    ai.getBotMove17,
+    ai.getBotMove18,
+    ai.getBotMove19,
+    ai.getBotMove20,
+};
+
 pub fn setEnnemyStone(x: u32, y: u32) PlayError!void {
     if (board.game_board.isCoordinatesOutside(x, y)) {
         return PlayError.OUTSIDE;
@@ -26,7 +52,7 @@ pub fn setEnnemyStone(x: u32, y: u32) PlayError!void {
 }
 
 pub fn AIPlay() [2]u16 {
-    const empty_cell = ai.findBestMove(&board.game_board);
+    const empty_cell = @call(.auto, AIMap[board.game_board.width], .{});
     board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
     return .{empty_cell.col, empty_cell.row};
 }
