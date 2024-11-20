@@ -215,14 +215,37 @@ pub const ReshapedHeatmap = struct {
     original_height: u32,
     original_width: u32,
 
-    // pub fn dilateWithValue(
+    pub fn extractPatch(
+        self: ReshapedHeatmap,
+        coordinates: Coordinates,
+        data: []CellData,
+        kernel_size: u32
+    ) void {
+        const half_kernel = kernel_size / 2;
+        const start_x = coordinates.x - half_kernel + 1;
+        const start_y = coordinates.y - half_kernel + 1;
+
+        var y: u32 = 0;
+        while (y < kernel_size) : (y += 1) {
+            var x: u32 = 0;
+            while (x < kernel_size) : (x += 1) {
+                const source_idx = self.heatmap.coordinatesToIndex(
+                    start_x + x,
+                    start_y + y
+                );
+                const target_idx = y * kernel_size + x;
+                data[target_idx] = self.heatmap.map[source_idx];
+            }
+        }
+    }
+
+    // pub fn dilateWithKernel(
     //     self: *ReshapedHeatmap,
     //     kernel: []f32,
-    //     kernel_height: u32,
-    //     kernel_width: u32,
+    //     kernel_size: u32,
     // ) void {
-    //     for (1..self.heatmap.width - 1) |y| {
-    //         for (1..self.heatmap.height - 1) |x| {
+    //     for (0..self.original_height) |y| {
+    //         for (0..self.original_width) |x| {
     //
     //         }
     //     }
@@ -257,21 +280,6 @@ fn getMaxHiglightZone(board: Board) ?Zone {
         .importance = 0.5,
     };
 }
-
-/// # Function used to higlight the map center in the early rounds.
-/// - Details:
-///     In order to favorise playing in the center.
-/// - Parameters:
-///     - board: The game board.
-///     - context: The game context.
-///     - heatmap: The heatmap to modify.
-// pub fn highlightMapCenter(
-//     board: Board,
-//     context: GameContext,
-//     heatmap: *std.ArrayList
-// ) void {
-//     if (board.width >= 10)
-// }
 
 /// Function used to obtain the distance between 2 coos.
 fn getDistance(point1: Coordinates, point2: Coordinates) u32 {
@@ -354,12 +362,21 @@ pub fn bestActionHeatmap(
         heatmap.applyZone(higlightMiddleZones.?);
     }
 
-    // Create the distance kernel.
-    const distance_kernel = createDistanceKernel(MAX_DILATIONS);
-    _ = distance_kernel;
-
-    // Highlight 5 of width from existing tokens on map.
-    // const paddedHeatmap = heatmap.cloneWithPadding(allocator, MAX_DILATIONS);
+    // // Create the distance kernel.
+    // const distance_kernel = createDistanceKernel(MAX_DILATIONS);
+    //
+    // // Create the interest kernel.
+    // const interest_kernel = createInterestKernel(
+    //     MAX_DILATIONS,
+    //     &distance_kernel
+    // );
+    // _ = interest_kernel;
+    //
+    // // Highlight 5 of width from existing tokens on map.
+    // const paddedHeatmap = try heatmap.cloneWithPadding(
+    //     allocator,
+    //     MAX_DILATIONS
+    // );
     // _ = paddedHeatmap;
 
     return heatmap;
@@ -632,4 +649,136 @@ test "createInterestKernel 5x5" {
     for (interest_kernel, expected) |actual, exp| {
         try std.testing.expectApproxEqAbs(exp, actual, 0.01);
     }
+}
+
+test "ReshapedHeatmap.extractPatch - Basic extraction" {
+    var allocator = std.testing.allocator;
+
+    // Create a 5x5 heatmap
+    var original = try HeatMap.init(allocator, 5, 5);
+    defer original.deinit(allocator);
+
+    // Fill with test data
+    for (0..5) |y| {
+        for (0..5) |x| {
+            original.map[original.coordinatesToIndex(
+                @as(u32, @intCast(x)),
+                @as(u32, @intCast(y))
+            )] = CellData{
+                .cell = .empty,
+                .importance = @as(f32, @floatFromInt(y * 5 + x)),
+            };
+        }
+    }
+
+    // Add padding of 1 on each side to make it 7x7
+    var padded = try original.cloneWithPadding(allocator, 1);
+    defer padded.heatmap.deinit(allocator);
+
+    // Create buffer for 3x3 patch
+    const patch = try allocator.alloc(CellData, 9); // 3x3
+    defer allocator.free(patch);
+
+    // Extract patch from center
+    padded.extractPatch(
+        Coordinates{ .x = 2, .y = 2 },
+        patch,
+        3
+    );
+
+    // Verify central patch values
+    try std.testing.expectEqual(@as(f32, 6), patch[0].importance); // Top-left
+    try std.testing.expectEqual(@as(f32, 7), patch[1].importance); //
+    // Top-middle
+    try std.testing.expectEqual(@as(f32, 8), patch[2].importance); // Top-right
+    try std.testing.expectEqual(@as(f32, 11), patch[3].importance); //
+    // Middle-left
+    try std.testing.expectEqual(@as(f32, 12), patch[4].importance); // Center
+    try std.testing.expectEqual(@as(f32, 13), patch[5].importance); //
+    // Middle-right
+    try std.testing.expectEqual(@as(f32, 16), patch[6].importance); //
+    // Bottom-left
+    try std.testing.expectEqual(@as(f32, 17), patch[7].importance); //
+    // Bottom-middle
+    try std.testing.expectEqual(@as(f32, 18), patch[8].importance); //
+    // Bottom-right
+}
+
+test "ReshapedHeatmap.extractPatch - Corner extraction" {
+    var allocator = std.testing.allocator;
+
+    // Create a 4x4 heatmap
+    var original = try HeatMap.init(allocator, 4, 4);
+    defer original.deinit(allocator);
+
+    // Fill with test data
+    for (0..4) |y| {
+        for (0..4) |x| {
+            original.map[original.coordinatesToIndex(
+                @as(u32, @intCast(x)),
+                @as(u32, @intCast(y))
+            )] = CellData{
+                .cell = .empty,
+                .importance = @as(f32, @floatFromInt(y * 4 + x)),
+            };
+        }
+    }
+
+    // Add padding of 1 on each side to make it 6x6
+    var padded = try original.cloneWithPadding(allocator, 1);
+    defer padded.heatmap.deinit(allocator);
+
+    // Create buffer for 3x3 patch
+    const patch = try allocator.alloc(CellData, 9); // 3x3
+    defer allocator.free(patch);
+
+    // Extract patch from top-left corner
+    padded.extractPatch(
+        Coordinates{ .x = 1, .y = 1 },
+        patch,
+        3
+    );
+
+    try std.testing.expectEqual(@as(f32, 5), patch[4].importance);
+    try std.testing.expectEqual(@as(f32, 6), patch[5].importance);
+    try std.testing.expectEqual(@as(f32, 9), patch[7].importance);
+    try std.testing.expectEqual(@as(f32, 10), patch[8].importance);
+}
+
+test "ReshapedHeatmap.extractPatch - Different kernel sizes" {
+    var allocator = std.testing.allocator;
+
+    // Create a 6x6 heatmap
+    var original = try HeatMap.init(allocator, 6, 6);
+    defer original.deinit(allocator);
+
+    // Fill with test data
+    for (0..6) |y| {
+        for (0..6) |x| {
+            original.map[original.coordinatesToIndex(
+                @as(u32, @intCast(x)),
+                @as(u32, @intCast(y))
+            )] = CellData{
+                .cell = .empty,
+                .importance = @as(f32, @floatFromInt(y * 6 + x)),
+            };
+        }
+    }
+
+    // Add padding of 2 on each side to make it 10x10
+    var padded = try original.cloneWithPadding(allocator, 2);
+    defer padded.heatmap.deinit(allocator);
+
+    // Test with 5x5 kernel
+    const large_patch = try allocator.alloc(CellData, 25); // 5x5
+    defer allocator.free(large_patch);
+
+    padded.extractPatch(
+        Coordinates{ .x = 3, .y = 3 },
+        large_patch,
+        5
+    );
+
+    // Verify center value
+    try std.testing.expectEqual(@as(f32, 14), large_patch[12].importance);
 }
