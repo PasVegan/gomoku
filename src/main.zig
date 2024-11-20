@@ -4,13 +4,14 @@ const message = @import("message.zig");
 const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
 const io = @import("io.zig");
+const build_options = @import("build_options");
 
 const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
 const stdout = std.io.getStdOut().writer();
 
-var prng = std.rand.DefaultPrng.init(0);
-pub const random = prng.random();
+var prng = std.Random.DefaultPrng.init(0);
+pub var random = prng.random();
 
 /// Application memory allocator (arena).
 pub var allocator: std.mem.Allocator = undefined;
@@ -59,13 +60,22 @@ pub fn main() !void {
     defer arena.deinit();
 
     allocator = arena.allocator();
+
     message.init(allocator);
+
     game.gameSettings.allocator = allocator;
     defer game.gameSettings.deinit();
 
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+
+    random = real_prng.random();
+
     // Initialize the board.
     board.game_board = board.Board.init(
-        allocator,
         allocator,
         height, width
     ) catch |err| { return err; };
@@ -73,9 +83,14 @@ pub fn main() !void {
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
-    while (!should_stop) {
-        try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
-        try handleCommand(read_buffer.slice(), stdout.any());
+    if (build_options.GUI) {
+        const gui = @import("gui.zig");
+        try gui.run_gui();
+    } else {
+        while (!should_stop) {
+            try io.readLineIntoBuffer(stdin.any(), &read_buffer, stdout.any());
+            try handleCommand(read_buffer.slice(), stdout.any());
+        }
     }
 }
 

@@ -4,6 +4,7 @@ const io = @import("../io.zig");
 const message = @import("../message.zig");
 const main = @import("../main.zig");
 const game = @import("../game.zig");
+const ai = @import("../ai.zig");
 
 var stdin = std.io.getStdIn().reader().any();
 
@@ -22,7 +23,7 @@ fn getValuesFromBoardLine(
     line: []const u8,
     parsed_values: *[3]?u32,
 ) !void {
-    var it = std.mem.split(u8, line, ",");
+    var it = std.mem.splitScalar(u8, line, ',');
     for (0..3) |i| {
         const word = it.next();
         if (word == null) {
@@ -89,14 +90,12 @@ fn handleBoard (
             parsed_values[0].?,
             parsed_values[1].?,
             @enumFromInt(parsed_values[2].?)
-        ) catch |err| {
-            return try message.sendLogF(.ERROR, "error: {}", .{err}, writer);
-        };
+        );
     }
     // Send coordinates.
-    const empty_cell = try board.findRandomValidCell(board.game_board, main.random);
-    try board.game_board.setCellByCoordinates(empty_cell.x, empty_cell.y, board.Cell.own);
-    try message.sendMessageF("{d},{d}", .{empty_cell.x, empty_cell.y}, writer);
+    const empty_cell = ai.findBestMove(&board.game_board);
+    board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
+    try message.sendMessageF("{d},{d}", .{empty_cell.col, empty_cell.row}, writer);
     return;
 }
 
@@ -117,8 +116,7 @@ test "handle valid input" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -143,8 +141,7 @@ test "handleBoard valid input" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -168,18 +165,15 @@ test "handleBoard invalid coordinates" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
     try handleBoard(fbs.reader().any(), buffer.writer().any());
 
     // Verify error message was written
-    try testing.expect(std.mem.eql(u8, buffer.items,
-        "ERROR error the coordinates are outside the map: x:999 y:999 "
-        ++ "map_width:3 map_height:3\n"
-    ));
+    try testing.expectEqualStrings("ERROR error the coordinates are outside the map: x:999 y:999 map_width:5 map_height:5\n",
+        buffer.items);
 }
 
 test "handleBoard invalid cell type" {
@@ -195,8 +189,7 @@ test "handleBoard invalid cell type" {
     // Initialize the board.
     board.game_board = board.Board.init(
         testing.allocator,
-        testing.allocator,
-        3, 3
+        5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
 
@@ -250,8 +243,7 @@ test "handleBoard early DONE" {
     defer buffer.deinit();
 
     // Initialize the board.
-    board.game_board = board.Board.init(std.testing.allocator, std.testing
-    .allocator, 3, 3) catch |err| { return err; };
+    board.game_board = board.Board.init(std.testing.allocator, 5, 5) catch |err| { return err; };
     defer board.game_board.deinit(std.testing.allocator);
 
     // Setup a test reader with immediate DONE
@@ -325,7 +317,6 @@ test "Board initialization and deinitialization" {
 
     var test_board = try board.Board.init(
         testing.allocator,
-        testing.allocator,
         height,
         width
     );
@@ -338,19 +329,22 @@ test "Board initialization and deinitialization" {
 
 test "findRandomValidCell with empty board" {
     const testing = std.testing;
-    const height: u32 = 3;
-    const width: u32 = 3;
+    const height: u32 = 10;
+    const width: u32 = 10;
 
     var test_board = try board.Board.init(
-        testing.allocator,
         testing.allocator,
         height,
         width
     );
     defer test_board.deinit(testing.allocator);
 
-    var prng = std.rand.DefaultPrng.init(42);
-    const coords = try board.findRandomValidCell(test_board, prng.random());
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    const coords = try board.findRandomValidCell(test_board, real_prng.random());
 
     try testing.expect(coords.x < width);
     try testing.expect(coords.y < height);
@@ -358,11 +352,10 @@ test "findRandomValidCell with empty board" {
 
 test "findRandomValidCell with full board" {
     const testing = std.testing;
-    const height: u32 = 3;
-    const width: u32 = 3;
+    const height: u32 = 5;
+    const width: u32 = 5;
 
     var test_board = try board.Board.init(
-        testing.allocator,
         testing.allocator,
         height,
         width
@@ -372,7 +365,7 @@ test "findRandomValidCell with full board" {
     // Fill the board
     for (0..height) |y| {
         for (0..width) |x| {
-            try test_board.setCellByCoordinates(
+            test_board.setCellByCoordinates(
                 @intCast(x),
                 @intCast(y),
                 board.Cell.own
@@ -380,7 +373,7 @@ test "findRandomValidCell with full board" {
         }
     }
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = std.Random.DefaultPrng.init(42);
     try testing.expectError(
         error.NoEmptyCells,
         board.findRandomValidCell(test_board, prng.random())
@@ -389,23 +382,16 @@ test "findRandomValidCell with full board" {
 
 test "Board move history" {
     const testing = std.testing;
-    const height: u32 = 3;
-    const width: u32 = 3;
+    const height: u32 = 5;
+    const width: u32 = 5;
 
     var test_board = try board.Board.init(
-        testing.allocator,
         testing.allocator,
         height,
         width
     );
     defer test_board.deinit(testing.allocator);
 
-    try test_board.setCellByCoordinates(1, 1, board.Cell.own);
-    try test_board.setCellByCoordinates(2, 2, board.Cell.opponent);
-
-    try testing.expectEqual(@as(usize, 2), test_board.move_history.items.len);
-    try testing.expectEqual(@as(u32, 1), test_board.move_history.items[0].x);
-    try testing.expectEqual(@as(u32, 1), test_board.move_history.items[0].y);
-    try testing.expectEqual(@as(u32, 2), test_board.move_history.items[1].x);
-    try testing.expectEqual(@as(u32, 2), test_board.move_history.items[1].y);
+    test_board.setCellByCoordinates(1, 1, board.Cell.own);
+    test_board.setCellByCoordinates(2, 2, board.Cell.opponent);
 }
