@@ -5,7 +5,8 @@ const Cell = @import("board.zig").Cell;
 const Board = @import("board.zig").Board;
 
 /// Width of dilations for heatmap.
-const MAX_DILATIONS = 5;
+const MAX_DILATIONS = 4;
+const DILATION_THRESHOLD = 1;
 
 /// # Structure representing the data of a cell.
 /// - Attributes:
@@ -39,15 +40,25 @@ const HeatMap = struct {
     ///     - The initialized map.
     pub fn init(
         map_allocator: std.mem.Allocator,
-        height: u32, width: u32
+        height: u32, width: u32,
+        board: ?Board,
     ) !HeatMap {
         const map = try map_allocator.alloc(CellData, height * width);
 
-        // Initialize the heatmap to zero.
-        @memset(map, CellData {
-            .cell = .empty,
-            .importance = 0,
-        });
+        if (board == null) {
+            // Initialize the heatmap to zero.
+            @memset(map, CellData {
+                .cell = .empty,
+                .importance = 0,
+            });
+        } else {
+            for (board.?.map, 0..board.?.map.len) |cell, i| {
+                map[i] = CellData{
+                    .cell = cell,
+                    .importance = 0,
+                };
+            }
+        }
         return HeatMap {
             .map = map,
             .height = height,
@@ -80,7 +91,7 @@ const HeatMap = struct {
         const new_width = self.width + (padding * 2);
         const new_height = self.height + (padding * 2);
 
-        var new_map = try HeatMap.init(allocator, new_height, new_width);
+        var new_map = try HeatMap.init(allocator, new_height, new_width, null);
 
         // Copy the original data to the padded position
         var y: u32 = 0;
@@ -117,7 +128,7 @@ const HeatMap = struct {
             return error.ShapeTooLarge;
         }
 
-        var new_map = try HeatMap.init(allocator, new_height, new_width);
+        var new_map = try HeatMap.init(allocator, new_height, new_width, null);
 
         const start_x = (self.width - new_width) / 2;
         const start_y = (self.height - new_height) / 2;
@@ -228,6 +239,25 @@ pub const ReshapedHeatmap = struct {
         };
     }
 
+    /// Convert padded array coordinates back to original coordinates
+    /// - Parameters:
+    ///     - self: The current ReshapedHeatmap
+    ///     - padded_coords: The coordinates in the padded array
+    /// - Returns:
+    ///     - The corresponding coordinates in the original array
+    pub fn toPaddedCoordinates(
+        self: ReshapedHeatmap,
+        original_coords: Coordinates,
+    ) Coordinates {
+        const padding_x = (self.heatmap.width - self.original_width) / 2;
+        const padding_y = (self.heatmap.height - self.original_height) / 2;
+
+        return Coordinates{
+            .x = original_coords.x + padding_x,
+            .y = original_coords.y + padding_y,
+        };
+    }
+
     pub fn extractPatch(
         self: ReshapedHeatmap,
         coordinates: Coordinates,
@@ -235,16 +265,20 @@ pub const ReshapedHeatmap = struct {
         kernel_size: u32
     ) void {
         const half_kernel = kernel_size / 2;
-        const start_x = coordinates.x - half_kernel + 1;
-        const start_y = coordinates.y - half_kernel + 1;
+        const start_x =
+            ((self.heatmap.width - self.original_width) / 2) +
+                coordinates.x;
+        const start_y =
+            ((self.heatmap.height - self.original_height) / 2) +
+                coordinates.y;
 
         var y: u32 = 0;
         while (y < kernel_size) : (y += 1) {
             var x: u32 = 0;
             while (x < kernel_size) : (x += 1) {
                 const source_idx = self.heatmap.coordinatesToIndex(
-                    start_x + x,
-                    start_y + y
+                    start_x - half_kernel + x,
+                    start_y - half_kernel + y
                 );
                 const target_idx = y * kernel_size + x;
                 data[target_idx] = self.heatmap.map[source_idx];
@@ -252,32 +286,68 @@ pub const ReshapedHeatmap = struct {
         }
     }
 
-    // pub fn dilateWithKernel(
-    //     self: *ReshapedHeatmap,
-    //     kernel: []f32,
-    //     kernel_size: u32,
-    // ) void {
-    //     const half_kernel = kernel_size / 2;
-    //     var extracted_data: [kernel_size]CellData = undefined;
-    //     for (0..self.original_height) |y| {
-    //         for (0..self.original_width) |x| {
-    //             self.extractPatch(
-    //                 Coordinates{.x = x, .y = y},
-    //                 &extracted_data,
-    //                 kernel_size
-    //             );
-    //             const map_index
-    //             self.heatmap.map[...].importance = getMaxValueFromArray
-    //             (extracted_data);
-    //         }
-    //     }
-    // }
+    pub fn dilateWithKernel(
+        self: *ReshapedHeatmap,
+        kernel: []const f32,
+        kernel_size: u32,
+        allocator: std.mem.Allocator,
+    ) !void {
+        // Allocate temporary arrays.
+        const extracted_data: []CellData = try allocator.alloc(
+            CellData,
+            kernel_size * kernel_size
+        );
+        defer allocator.free(extracted_data);
+        var masked_values: []f32 = try allocator.alloc(
+            f32,
+            kernel_size * kernel_size
+        );
+        defer allocator.free(masked_values);
+        for (0..self.original_height) |y| {
+            for (0..self.original_width) |x| {
+                // Convert x and y to coordinates.
+                const coo = Coordinates{
+                    .x = @as(u32, @intCast(x)),
+                    .y = @as(u32, @intCast(y)),
+                };
+
+                // Extract patch of the same size of the kernel.
+                self.extractPatch(coo, extracted_data, kernel_size);
+
+                // Obtain coordinates into the padded array.
+                const padded_coordinates = self.toPaddedCoordinates(coo);
+                const idx = self.heatmap.coordinatesToIndex(
+                    padded_coordinates.x,
+                    padded_coordinates.y
+                );
+
+                // Reset the masked_values array.
+                @memset(masked_values, 0.0);
+
+                // Get the kernel values only non-empty cells.
+                for (0..extracted_data.len) |i| {
+                    masked_values[i] =
+                        @as(f32, @floatFromInt(@intFromBool(extracted_data[i].cell !=
+                        .empty))) * kernel[i];
+                }
+
+                // Get the maximum value of the resulting array.
+                self.heatmap.map[idx].importance =
+                    @max(
+                        self.heatmap.map[idx].importance,
+                        getMaxValueFromArray(masked_values)
+                    );
+            }
+        }
+    }
 };
 
-fn getMaxValueFromArray(array: []f32) f32 {
-    const max = array[0];
+fn getMaxValueFromArray(array: []const f32) f32 {
+    var max: f32 = array[0];
     for (1..array.len) |i| {
-        max = if (array[i] > max) ? array[i] else max;
+        if (array[i] > max) {
+            max = array[i];
+        }
     }
     return max;
 }
@@ -307,7 +377,7 @@ fn getMaxHiglightZone(board: Board) ?Zone {
     return Zone {
         .start = Coordinates{ .x = start_x, .y = start_y },
         .end = Coordinates{ .x = end_x, .y = end_y },
-        .importance = 0.5,
+        .importance = 0.1,
     };
 }
 
@@ -364,10 +434,10 @@ fn createInterestKernel(
     const width = (kernel_size / 2) + 1;
 
     inline for (0..array.len) |index| {
-        array[index] = calculateInterest(
-            distance_kernel[index],
+        array[index] = if (distance_kernel[index] != 0) calculateInterest(
+            distance_kernel[index] - DILATION_THRESHOLD,
             width
-        );
+        ) else 1.0;
     }
     return array;
 }
@@ -382,8 +452,10 @@ pub fn bestActionHeatmap(
     var heatmap = try HeatMap.init(
         allocator,
         board.height,
-        board.width
+        board.width,
+        board
     );
+    defer heatmap.deinit(allocator);
 
     // Higlight the middle of the map in order to favorise action in the
     // middle in early rounds.
@@ -392,24 +464,36 @@ pub fn bestActionHeatmap(
         heatmap.applyZone(higlightMiddleZones.?);
     }
 
-    // // Create the distance kernel.
-    // const distance_kernel = createDistanceKernel(MAX_DILATIONS);
-    //
-    // // Create the interest kernel.
-    // const interest_kernel = createInterestKernel(
-    //     MAX_DILATIONS,
-    //     &distance_kernel
-    // );
-    // _ = interest_kernel;
-    //
-    // // Highlight 5 of width from existing tokens on map.
-    // const paddedHeatmap = try heatmap.cloneWithPadding(
-    //     allocator,
-    //     MAX_DILATIONS
-    // );
-    // _ = paddedHeatmap;
+    // Create the distance kernel.
+    const distance_kernel = createDistanceKernel(MAX_DILATIONS * 2 + 1);
 
-    return heatmap;
+    // Create the interest kernel.
+    const interest_kernel = createInterestKernel(
+        MAX_DILATIONS * 2 + 1,
+        &distance_kernel
+    );
+
+    // Highlight 4 of width from existing tokens on map.
+    var padded_heatmap = try heatmap.cloneWithPadding(
+        allocator,
+        MAX_DILATIONS * 2 + 1,
+    );
+    defer padded_heatmap.heatmap.deinit(allocator);
+
+    try padded_heatmap.dilateWithKernel(
+        &interest_kernel,
+        MAX_DILATIONS * 2 + 1,
+        allocator
+    );
+    
+    // Reshape the heatmap in order to have the same shape than start.
+    const reshaped_heatmap = try padded_heatmap.heatmap.getShape(
+        allocator,
+        board.width,
+        board.height
+    );
+
+    return reshaped_heatmap.heatmap;
 }
 
 test "getHiglightWidthHeight handles different sizes" {
@@ -476,7 +560,7 @@ test "HeatMap initialization" {
     const height: u32 = 10;
     const width: u32 = 10;
 
-    var heatmap = try HeatMap.init(allocator, height, width);
+    var heatmap = try HeatMap.init(allocator, height, width, null);
     defer heatmap.deinit(allocator);
 
     try testing.expectEqual(heatmap.height, height);
@@ -494,7 +578,7 @@ test "HeatMap coordinatesToIndex" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var heatmap = try HeatMap.init(allocator, 5, 5);
+    var heatmap = try HeatMap.init(allocator, 5, 5, null);
     defer heatmap.deinit(allocator);
 
     try testing.expectEqual(heatmap.coordinatesToIndex(0, 0), 0);
@@ -537,7 +621,7 @@ test "HeatMap applyZone" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var heatmap = try HeatMap.init(allocator, 5, 5);
+    var heatmap = try HeatMap.init(allocator, 5, 5, null);
     defer heatmap.deinit(allocator);
 
     const zone = Zone{
@@ -568,11 +652,15 @@ test "bestActionHeatmap early game" {
     const allocator = testing.allocator;
 
     var board = try Board.init(std.testing.allocator, 15, 15);
-    board.deinit(std.testing.allocator);
+    defer board.deinit(std.testing.allocator);
 
     const context = GameContext{
         .round = 5,
     };
+
+    // Set points in the top of the map.
+    board.setCellByCoordinates(0, 0, .own);
+    board.setCellByCoordinates(6, 0, .own);
 
     var heatmap = try bestActionHeatmap(board, context, allocator);
     defer heatmap.?.deinit(allocator);
@@ -581,8 +669,10 @@ test "bestActionHeatmap early game" {
     const center_idx = heatmap.?.coordinatesToIndex(7, 7);
     try testing.expect(heatmap.?.map[center_idx].importance > 0);
 
-    // Check corners are not highlighted
-    try testing.expectEqual(heatmap.?.map[0].importance, 0);
+    // There is a token on the left.
+    try testing.expectEqual(heatmap.?.map[1].importance, 1);
+
+    // Nothing here.
     try testing.expectEqual(heatmap.?.map[14].importance, 0);
     try testing.expectEqual(heatmap.?.map[210].importance, 0);
     try testing.expectEqual(heatmap.?.map[224].importance, 0);
@@ -593,7 +683,7 @@ test "bestActionHeatmap late game" {
     const allocator = testing.allocator;
 
     var board = try Board.init(std.testing.allocator, 15, 15);
-    board.deinit(std.testing.allocator);
+    defer board.deinit(std.testing.allocator);
 
     const context = GameContext{
         .round = 10,
@@ -669,11 +759,11 @@ test "createInterestKernel 5x5" {
     const distance_kernel = createDistanceKernel(5);
     const interest_kernel = createInterestKernel(5, &distance_kernel);
     const expected = [_]f32{
-        0.33, 0.33, 0.33, 0.33, 0.33,
-        0.33, 0.66, 0.66, 0.66, 0.33,
-        0.33, 0.66, 1.0, 0.66, 0.33,
-        0.33, 0.66, 0.66, 0.66, 0.33,
-        0.33, 0.33, 0.33, 0.33, 0.33,
+        0.66, 0.66, 0.66, 0.66, 0.66,
+        0.66, 1.0, 1.0, 1.0, 0.66,
+        0.66, 1.0, 1.0, 1.0, 0.66,
+        0.66, 1.0, 1.0, 1.0, 0.66,
+        0.66, 0.66, 0.66, 0.66, 0.66,
     };
 
     for (interest_kernel, expected) |actual, exp| {
@@ -685,7 +775,7 @@ test "ReshapedHeatmap.extractPatch - Basic extraction" {
     var allocator = std.testing.allocator;
 
     // Create a 5x5 heatmap
-    var original = try HeatMap.init(allocator, 5, 5);
+    var original = try HeatMap.init(allocator, 5, 5, null);
     defer original.deinit(allocator);
 
     // Fill with test data
@@ -738,7 +828,7 @@ test "ReshapedHeatmap.extractPatch - Corner extraction" {
     var allocator = std.testing.allocator;
 
     // Create a 4x4 heatmap
-    var original = try HeatMap.init(allocator, 4, 4);
+    var original = try HeatMap.init(allocator, 4, 4, null);
     defer original.deinit(allocator);
 
     // Fill with test data
@@ -779,7 +869,7 @@ test "ReshapedHeatmap.extractPatch - Different kernel sizes" {
     var allocator = std.testing.allocator;
 
     // Create a 6x6 heatmap
-    var original = try HeatMap.init(allocator, 6, 6);
+    var original = try HeatMap.init(allocator, 6, 6, null);
     defer original.deinit(allocator);
 
     // Fill with test data
@@ -810,73 +900,97 @@ test "ReshapedHeatmap.extractPatch - Different kernel sizes" {
     );
 
     // Verify center value
-    try std.testing.expectEqual(@as(f32, 14), large_patch[12].importance);
+    try std.testing.expectEqual(@as(f32, 21), large_patch[12].importance);
 }
 
-test "ReshapedHeatmap - transformCoordinates basic transformation" {
-    const allocator = std.testing.allocator;
+test "ReshapedHeatmap - coordinate transformations" {
+    // Initialize a test heatmap (5x5) with padding of 2 on each side
+    var original_map = try HeatMap.init(std.testing.allocator, 5, 5, null);
+    defer original_map.deinit(std.testing.allocator);
 
-    // Create original heatmap 3x3
-    var original = try HeatMap.init(allocator, 3, 3);
-    defer original.deinit(allocator);
+    var padded_map = try original_map.cloneWithPadding(std.testing.allocator,
+        2);
+    defer padded_map.heatmap.deinit(std.testing.allocator);
 
-    // Create reshaped heatmap with padding of 1 (resulting in 5x5)
-    var reshaped = try original.cloneWithPadding(allocator, 1);
-    defer reshaped.heatmap.deinit(allocator);
+    // Test case 1: Convert origin coordinates
+    {
+        const original_coords = Coordinates{ .x = 0, .y = 0 };
+        const padded_coords = padded_map.toPaddedCoordinates(original_coords);
 
-    // Test corner coordinates
-    const top_left = reshaped.transformCoordinates(Coordinates{ .x = 0, .y = 0 });
-    try std.testing.expectEqual(@as(u32, 1), top_left.x);
-    try std.testing.expectEqual(@as(u32, 1), top_left.y);
+        try std.testing.expectEqual(@as(u32, 2), padded_coords.x);
+        try std.testing.expectEqual(@as(u32, 2), padded_coords.y);
 
-    const bottom_right = reshaped.transformCoordinates(Coordinates{ .x = 2, .y = 2 });
-    try std.testing.expectEqual(@as(u32, 3), bottom_right.x);
-    try std.testing.expectEqual(@as(u32, 3), bottom_right.y);
+        // Test inverse transformation
+        const restored_coords = padded_map.transformCoordinates(original_coords);
+        try std.testing.expectEqual(padded_coords.x, restored_coords.x);
+        try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
 
-    // Test center coordinate
-    const center = reshaped.transformCoordinates(Coordinates{ .x = 1, .y = 1 });
-    try std.testing.expectEqual(@as(u32, 2), center.x);
-    try std.testing.expectEqual(@as(u32, 2), center.y);
-}
+    // Test case 2: Convert center coordinates
+    {
+        const original_coords = Coordinates{ .x = 2, .y = 2 };
+        const padded_coords = padded_map.toPaddedCoordinates(original_coords);
 
-test "ReshapedHeatmap - transformCoordinates with different padding sizes" {
-    const allocator = std.testing.allocator;
+        try std.testing.expectEqual(@as(u32, 4), padded_coords.x);
+        try std.testing.expectEqual(@as(u32, 4), padded_coords.y);
 
-    // Create original heatmap 4x4
-    var original = try HeatMap.init(allocator, 4, 4);
-    defer original.deinit(allocator);
+        // Test inverse transformation
+        const restored_coords = padded_map.transformCoordinates(original_coords);
+        try std.testing.expectEqual(padded_coords.x, restored_coords.x);
+        try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
 
-    // Test with padding of 2 (resulting in 8x8)
-    var reshaped_large_padding = try original.cloneWithPadding(allocator, 2);
-    defer reshaped_large_padding.heatmap.deinit(allocator);
+    // Test case 3: Convert edge coordinates
+    {
+        const original_coords = Coordinates{ .x = 4, .y = 4 };
+        const padded_coords = padded_map.toPaddedCoordinates(original_coords);
 
-    const transformed = reshaped_large_padding.transformCoordinates(Coordinates{ .x = 0, .y = 0 });
-    try std.testing.expectEqual(@as(u32, 2), transformed.x);
-    try std.testing.expectEqual(@as(u32, 2), transformed.y);
-}
+        try std.testing.expectEqual(@as(u32, 6), padded_coords.x);
+        try std.testing.expectEqual(@as(u32, 6), padded_coords.y);
 
-test "ReshapedHeatmap - end-to-end coordinate transformation and data access" {
-    const allocator = std.testing.allocator;
+        // Test inverse transformation
+        const restored_coords = padded_map.transformCoordinates(original_coords);
+        try std.testing.expectEqual(padded_coords.x, restored_coords.x);
+        try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
 
-    // Create and initialize original 3x3 heatmap with test data
-    var original = try HeatMap.init(allocator, 3, 3);
-    defer original.deinit(allocator);
+    // Test case 4: Different padding size
+    {
+        var larger_padding = try original_map.cloneWithPadding(std.testing
+        .allocator, 3);
+        defer larger_padding.heatmap.deinit(std.testing.allocator);
 
-    // Set a test value in the original
-    const test_coords = Coordinates{ .x = 1, .y = 1 };
-    original.map[original.coordinatesToIndex(test_coords.x, test_coords.y)].importance = 1.0;
+        const original_coords = Coordinates{ .x = 2, .y = 2 };
+        const padded_coords = larger_padding.toPaddedCoordinates(original_coords);
 
-    // Create padded version (5x5)
-    var reshaped = try original.cloneWithPadding(allocator, 1);
-    defer reshaped.heatmap.deinit(allocator);
+        try std.testing.expectEqual(@as(u32, 5), padded_coords.x);
+        try std.testing.expectEqual(@as(u32, 5), padded_coords.y);
 
-    // Transform original coordinates
-    const transformed_coords = reshaped.transformCoordinates(test_coords);
+        // Test inverse transformation
+        const restored_coords = larger_padding.transformCoordinates(original_coords);
+        try std.testing.expectEqual(padded_coords.x, restored_coords.x);
+        try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
 
-    // Verify the value is accessible at the transformed coordinates
-    const value = reshaped.heatmap.map[
-        reshaped.heatmap.coordinatesToIndex(transformed_coords.x, transformed_coords.y)
-    ].importance;
+    // Test case 5: Asymmetric dimensions
+    {
+        var asymmetric_map = try HeatMap.init(std.testing.allocator, 4, 6,
+            null);
+        defer asymmetric_map.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(f32, 1.0), value);
+        var asymmetric_padded = try asymmetric_map.cloneWithPadding(std.testing
+        .allocator, 2);
+        defer asymmetric_padded.heatmap.deinit(std.testing.allocator);
+
+        const original_coords = Coordinates{ .x = 3, .y = 2 };
+        const padded_coords = asymmetric_padded.toPaddedCoordinates(original_coords);
+
+        try std.testing.expectEqual(@as(u32, 5), padded_coords.x);
+        try std.testing.expectEqual(@as(u32, 4), padded_coords.y);
+
+        // Test inverse transformation
+        const restored_coords = asymmetric_padded.transformCoordinates(original_coords);
+        try std.testing.expectEqual(padded_coords.x, restored_coords.x);
+        try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
 }
