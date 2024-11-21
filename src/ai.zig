@@ -1,6 +1,7 @@
 const Coordinates = @import("coordinates.zig").Coordinates(u32);
 const board = @import("board.zig");
 const std = @import("std");
+const zobrist = @import("zobrist.zig");
 
 // Represents a potential move with its position and evaluation score
 pub const Threat = struct {
@@ -131,68 +132,92 @@ fn evaluatePosition(map: []board.Cell, comptime size: u32) i32 {
     return score;
 }
 
-// Minimax algorithm with alpha-beta pruning
-pub fn minimax(map: []board.Cell, depth: u8, comptime isMaximizing: bool, alpha_in: i32, beta_in: i32, comptime size: u32) i32 {
+// Minimax algorithm with alpha-beta pruning and transposition table
+pub fn minimax(map: []board.Cell, zobrist_table: *zobrist.ZobristTable, depth: u8, comptime isMaximizing: bool,
+    alpha_in: i32, beta_in: i32, comptime size: u32) i32 {
+    // Check transposition table
+    if (zobrist_table.lookupPosition(depth, alpha_in, beta_in)) |cached_score| {
+        return cached_score;
+    }
+
     // Base case: evaluate position when depth is reached
     if (depth == 0) {
-        return evaluatePosition(map, comptime size);
+        const score = evaluatePosition(map, size);
+        zobrist_table.storePosition(depth, score, .EXACT);
+        return score;
     }
 
     var threats: [size * size]Threat = undefined;
-
     const player = comptime if (isMaximizing) board.Cell.own else board.Cell.opponent;
-
-    const nb_threats = findThreats(map, &threats, player, comptime size);
+    const nb_threats = findThreats(map, &threats, player, size);
 
     if (isMaximizing) {
         // Maximizing player's turn
         var maxScore: i32 = std.math.minInt(i32);
         var alpha = alpha_in;
         var i: u16 = 0;
-        while (i < nb_threats): (i += 1) {
+        while (i < nb_threats) : (i += 1) {
             const index = threats[i].row * size + threats[i].col;
             map[index] = board.Cell.own;
-            const score = minimax(map, depth - 1, false, alpha, beta_in, comptime size);
+            zobrist_table.updateHash(board.Cell.own, threats[i].row, threats[i].col);
+
+            const score = minimax(map, zobrist_table, depth - 1, false, alpha, beta_in, size);
+
             map[index] = board.Cell.empty;
+            zobrist_table.updateHash(board.Cell.own, threats[i].row, threats[i].col); // XOR again to undo
+
             maxScore = @max(maxScore, score);
             alpha = @max(alpha, score);
+
             if (beta_in <= alpha) {
+                zobrist_table.storePosition(depth, maxScore, .LOWERBOUND);
                 break; // Beta cutoff
             }
         }
+        zobrist_table.storePosition(depth, maxScore, .EXACT);
         return maxScore;
     } else {
         // Minimizing player's turn
         var minScore: i32 = std.math.maxInt(i32);
         var beta = beta_in;
         var i: u16 = 0;
-        while (i < nb_threats): (i += 1) {
+        while (i < nb_threats) : (i += 1) {
             const index = threats[i].row * size + threats[i].col;
             map[index] = board.Cell.opponent;
-            const score = minimax(map, depth - 1, true, alpha_in, beta, comptime size);
+            zobrist_table.updateHash(board.Cell.opponent, threats[i].row, threats[i].col);
+
+            const score = minimax(map, zobrist_table, depth - 1, true, alpha_in, beta, comptime size);
+
             map[index] = board.Cell.empty;
+            zobrist_table.updateHash(board.Cell.opponent, threats[i].row, threats[i].col); // XOR again to undo
+
             minScore = @min(minScore, score);
             beta = @min(beta, score);
+
             if (beta <= alpha_in) {
+                zobrist_table.storePosition(depth, minScore, .UPPERBOUND);
                 break; // Alpha cutoff
             }
         }
+        zobrist_table.storePosition(depth, minScore, .EXACT);
         return minScore;
     }
 }
 
-// Finds the best move for the AI using minimax algorithm
+// Finds the best move for the AI using minimax algorithm, zobrist transposition table
 pub fn findBestMove(comptime size: comptime_int) Threat {
     var current_board = &board.game_board;
     var bestScore: i32 = std.math.minInt(i32);
     var bestMove: Threat = Threat{ .row = 0, .col = 0, .score = 0 };
     var threats: [size * size]Threat = undefined;
 
+    _ = zobrist.ztable.calculateHash(current_board.map);
+
     const nb_threats = findThreats(current_board.map, &threats, board.Cell.own, comptime size);
 
     // Check for immediate winning moves
     var i: u16 = 0;
-    while (i < nb_threats): (i += 1) {
+    while (i < nb_threats) : (i += 1) {
         if (threats[i].score >= 100000) {
             return threats[i];
         }
@@ -203,10 +228,14 @@ pub fn findBestMove(comptime size: comptime_int) Threat {
     const beta: i32 = std.math.maxInt(i32);
 
     i = 0;
-    while (i < nb_threats): (i += 1) {
+    while (i < nb_threats) : (i += 1) {
         current_board.setCellByCoordinates(threats[i].col, threats[i].row, board.Cell.own);
-        const score = minimax(current_board.map, 4 - 1, false, alpha, beta, comptime size);
+        zobrist.ztable.updateHash(board.Cell.own, threats[i].row, threats[i].col);
+
+        const score = minimax(current_board.map, &zobrist.ztable, 4 - 1, false, alpha, beta, comptime size);
+
         current_board.setCellByCoordinates(threats[i].col, threats[i].row, board.Cell.empty);
+        zobrist.ztable.updateHash(board.Cell.own, threats[i].row, threats[i].col);
 
         if (score > bestScore) {
             bestScore = score;

@@ -2,6 +2,7 @@ const std = @import("std");
 const message = @import("../message.zig");
 const board = @import("../board.zig");
 const main = @import("../main.zig");
+const zorbrist = @import("../zobrist.zig");
 
 /// Function representing the start command, allocate the board.
 pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
@@ -23,6 +24,10 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         try message.sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
         return;
     };
+    if (zorbrist.ztable.size != size) {
+        zorbrist.ztable.deinit(main.allocator);
+        zorbrist.ztable = try zorbrist.ZobristTable.init(size, main.random, main.allocator);
+    }
     try message.sendMessageComptime("OK", writer);
 }
 
