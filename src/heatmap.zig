@@ -4,6 +4,9 @@ const GameContext = @import("game_context.zig").GameContext;
 const Cell = @import("board.zig").Cell;
 const Board = @import("board.zig").Board;
 
+var prng = std.Random.DefaultPrng.init(0);
+pub var random = prng.random();
+
 /// Width of dilations for heatmap.
 const MAX_DILATIONS = 4;
 const DILATION_THRESHOLD = 1;
@@ -159,7 +162,12 @@ const HeatMap = struct {
         self: HeatMap,
         allocator: std.mem.Allocator,
     ) !HeatMap {
-        const new_map = try HeatMap.init(allocator, self.height, self.width);
+        const new_map = try HeatMap.init(
+            allocator,
+            self.height,
+            self.width,
+            null
+        );
         @memcpy(new_map.map, self.map);
         return new_map;
     }
@@ -199,6 +207,81 @@ const HeatMap = struct {
             }
             continue;
         }
+    }
+
+    /// Method used to get the importance sum.
+    pub fn getImportanceSum(self: HeatMap) f32 {
+        var sum: f32 = 0;
+        for (self.map) |cell| {
+            sum += cell.importance;
+        }
+        return sum;
+    }
+
+    /// Method used to get the number of important values.
+    pub fn getNbOfImportantValues(self: HeatMap) u64 {
+        var count: u64 = 0;
+        for (self.map) |cell| {
+            if (cell.importance > 0) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    /// Method used to obtain an array of coordinate chosen by random
+    /// based on the heatmap values.
+    pub fn getRandomIndexes(
+        self: HeatMap,
+        allocator: std.mem.Allocator,
+    ) !std.ArrayList(u64) {
+        // Get the number of important values.
+        var nb_of_important_values = self.getNbOfImportantValues();
+
+        // Initialize array of index (output).
+        var array = try std.ArrayList(u64).initCapacity(
+            allocator,
+            nb_of_important_values
+        );
+
+        // Initialize a temporary heatmap.
+        var temp_heatmap = try self.clone(allocator);
+        defer temp_heatmap.deinit(allocator);
+
+        // Loop in order to fill the array.
+        while (nb_of_important_values > 0) {
+
+            // Sum of weights.
+            const sum = temp_heatmap.getImportanceSum();
+
+            // Guard against zero or negative sums
+            if (sum <= 0) break;
+
+            // Pick a random float in [0; sum).
+            // Use sum - std.math.f32_min to ensure random_value < sum
+            const random_value = random.float(f32) * (sum - std.math.floatMin(f32));
+
+            // Obtain an index randomly.
+            var cursor: f32 = 0;
+            var index: u64 = 0;
+            for (temp_heatmap.map) |cell| {
+                cursor += cell.importance;
+                if (cursor > random_value) {
+                    try array.append(index);
+                    break;
+                }
+                index += 1;
+            }
+
+            // Set the new index to zero in order to exclude it for the next
+            // times.
+            temp_heatmap.map[index].importance = 0;
+
+            // Decrement the number of important values.
+            nb_of_important_values -= 1;
+        }
+
+        return array;
     }
 
     /// # Method used to format the HeatMap into a string.
@@ -1008,5 +1091,89 @@ test "ReshapedHeatmap - coordinate transformations" {
         const restored_coords = asymmetric_padded.transformCoordinates(original_coords);
         try std.testing.expectEqual(padded_coords.x, restored_coords.x);
         try std.testing.expectEqual(padded_coords.y, restored_coords.y);
+    }
+}
+
+test "HeatMap.getImportanceSum" {
+    const allocator = std.testing.allocator;
+
+    // Test case 1: Empty map with zero importance
+    {
+        var heatmap = try HeatMap.init(allocator, 2, 2, null);
+        defer heatmap.deinit(allocator);
+
+        try std.testing.expectApproxEqAbs(
+            @as(f32, 0.0),
+            heatmap.getImportanceSum(),
+            0.001
+        );
+    }
+
+    // Test case 2: Map with mixed importance values
+    {
+        var heatmap = try HeatMap.init(allocator, 2, 2, null);
+        defer heatmap.deinit(allocator);
+
+        const zone1 = Zone{
+            .start = .{ .x = 0, .y = 0 },
+            .end = .{ .x = 1, .y = 1 },
+            .importance = 0.5,
+        };
+
+        const zone2 = Zone{
+            .start = .{ .x = 1, .y = 1 },
+            .end = .{ .x = 2, .y = 2 },
+            .importance = 1.0,
+        };
+
+        heatmap.applyZone(zone1);
+        heatmap.applyZone(zone2);
+
+        try std.testing.expectApproxEqAbs(
+            @as(f32, 1.5), // 0.5 + 1.0
+            heatmap.getImportanceSum(),
+            0.001
+        );
+    }
+
+    // Test case 3: Map with all cells having same importance
+    {
+        var heatmap = try HeatMap.init(allocator, 3, 3, null);
+        defer heatmap.deinit(allocator);
+
+        const zone = Zone{
+            .start = .{ .x = 0, .y = 0 },
+            .end = .{ .x = 3, .y = 3 },
+            .importance = 1.0,
+        };
+
+        heatmap.applyZone(zone);
+
+        try std.testing.expectApproxEqAbs(
+            @as(f32, 9.0), // 1.0 * 9 cells
+            heatmap.getImportanceSum(),
+            0.001
+        );
+    }
+
+    // Test case 4: Map with cleaned cells (importance set to 0)
+    {
+        var heatmap = try HeatMap.init(allocator, 2, 2, null);
+        defer heatmap.deinit(allocator);
+
+        const zone = Zone{
+            .start = .{ .x = 0, .y = 0 },
+            .end = .{ .x = 2, .y = 2 },
+            .importance = 1.0,
+        };
+
+        heatmap.applyZone(zone);
+        heatmap.cleanHeatMap();
+
+        try std.testing.expectApproxEqAbs(
+            @as(f32, 4.0), // All cells should still have importance 1.0 as they're empty
+            heatmap.getImportanceSum(),
+            0.001
+        );
     }
 }
