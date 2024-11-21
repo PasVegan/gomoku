@@ -6,6 +6,7 @@ const main = @import("../main.zig");
 const game = @import("../game.zig");
 const ai = @import("../ai.zig");
 const turn = @import("turn.zig");
+const zobrist = @import("../zobrist.zig");
 
 
 var stdin = std.io.getStdIn().reader().any();
@@ -110,6 +111,7 @@ test "handle valid input" {
     const testing = std.testing;
     var buffer = std.ArrayList(u8).init(testing.allocator);
     defer buffer.deinit();
+    message.init(std.testing.allocator);
 
     // Setup a test reader with valid input
     var fbs = std.io.fixedBufferStream(
@@ -122,6 +124,20 @@ test "handle valid input" {
         5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     stdin = fbs.reader().any();
     try handle("", buffer.writer().any());
@@ -147,6 +163,20 @@ test "handleBoard valid input" {
         5, 5
     ) catch |err| { return err; };
     defer board.game_board.deinit(testing.allocator);
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     try handleBoard(fbs.reader().any(), buffer.writer().any());
 
@@ -251,6 +281,20 @@ test "handleBoard early DONE" {
 
     // Setup a test reader with immediate DONE
     var fbs = std.io.fixedBufferStream("DONE\n");
+
+    var real_prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     try handleBoard(fbs.reader().any(), buffer.writer().any());
 

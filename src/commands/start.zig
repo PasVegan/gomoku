@@ -2,7 +2,7 @@ const std = @import("std");
 const message = @import("../message.zig");
 const board = @import("../board.zig");
 const main = @import("../main.zig");
-const zorbrist = @import("../zobrist.zig");
+const zobrist = @import("../zobrist.zig");
 
 /// Function representing the start command, allocate the board.
 pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
@@ -24,9 +24,9 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         try message.sendLogF(.ERROR, "error during the initialization of the board: {}", .{err}, writer);
         return;
     };
-    if (zorbrist.ztable.size != size) {
-        zorbrist.ztable.deinit(main.allocator);
-        zorbrist.ztable = try zorbrist.ZobristTable.init(size, main.random, main.allocator);
+    if (zobrist.ztable.size != size) {
+        zobrist.ztable.deinit(main.allocator);
+        zobrist.ztable = try zobrist.ZobristTable.init(size, main.random, main.allocator);
     }
     try message.sendMessageComptime("OK", writer);
 }
@@ -36,6 +36,12 @@ test "handleStart command valid input" {
     var list = std.ArrayList(u8).init(std.testing.allocator);
     defer list.deinit();
     message.init(main.allocator);
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        8,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     try handle("START 10", list.writer().any());
     try std.testing.expectEqualStrings("OK\n", list.items);

@@ -5,6 +5,7 @@ const main = @import("../main.zig");
 const ai = @import("../ai.zig");
 const game = @import("../game.zig");
 const MCTS = @import("../mcts.zig").MCTS;
+const zobrist = @import("../zobrist.zig");
 
 // Number of iteration for MCTS.
 const MAX_MCTS_ITERATIONS = 250000;
@@ -127,6 +128,13 @@ test "handleTurn command valid input" {
         break :blk seed;
     });
     main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     try handle("TURN 0,0", list.writer().any());
     // Check if we received the coordinates
@@ -277,6 +285,13 @@ test "handleTurn command cell already taken" {
         break :blk seed;
     });
     main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     // First place a stone
     try handle("TURN 0,0", list.writer().any());
