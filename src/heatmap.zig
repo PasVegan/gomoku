@@ -188,6 +188,19 @@ const HeatMap = struct {
         }
     }
 
+    /// Method used to clean the heatmap by removing importance on already
+    /// filled cells.
+    pub fn cleanHeatMap(
+        self: *HeatMap,
+    ) void {
+        for (0..self.*.map.len) |index| {
+            if (self.*.map[index].cell != .empty) {
+                self.*.map[index].importance = 0.0;
+            }
+            continue;
+        }
+    }
+
     /// # Method used to format the HeatMap into a string.
     /// - Parameters:
     ///     - self: The current HeatMap.
@@ -485,13 +498,16 @@ pub fn bestActionHeatmap(
         MAX_DILATIONS * 2 + 1,
         allocator
     );
-    
+
     // Reshape the heatmap in order to have the same shape than start.
-    const reshaped_heatmap = try padded_heatmap.heatmap.getShape(
+    var reshaped_heatmap = try padded_heatmap.heatmap.getShape(
         allocator,
         board.width,
         board.height
     );
+
+    // Clean the heatmap.
+    reshaped_heatmap.heatmap.cleanHeatMap();
 
     return reshaped_heatmap.heatmap;
 }
