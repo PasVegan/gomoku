@@ -1,6 +1,7 @@
 const std = @import("std");
 const Coordinates = @import("coordinates.zig").Coordinates(u32);
 const message = @import("message.zig");
+const GameContext = @import("game_context.zig").GameContext;
 
 // Global variable holding game settings.
 pub var gameSettings = GameSettings{
@@ -14,6 +15,7 @@ pub var gameSettings = GameSettings{
     .rule = GameRule{ .rule = 0 },
     .folder = "", // or allocate if you need to modify it later.
     .started = false,
+    .context = GameContext{.round = 0},
     .allocator = undefined,
 };
 
@@ -113,6 +115,7 @@ pub const GameSettings = struct {
     /// cannot store permanent files.
     folder: []u8,
     started: bool,
+    context: GameContext,
     allocator: std.mem.Allocator,
 
     /// Method to call to deinitialize the struct.

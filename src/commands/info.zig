@@ -185,6 +185,7 @@ test "GameSettings basic initialization" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
 
     try testing.expectEqual(@as(u64, 0), settings.timeout_turn);
@@ -213,6 +214,7 @@ test "GameSettings handle timeout commands" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -247,6 +249,7 @@ test "GameSettings handle memory and time commands" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -282,6 +285,7 @@ test "GameSettings handle game type and rule" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -311,6 +315,7 @@ test "GameSettings invalid game type" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -338,6 +343,7 @@ test "GameSettings invalid rule combinations" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -369,6 +375,7 @@ test "GameSettings handle folder" {
         .folder = "",
         .started = false,
         .allocator = testing.allocator,
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 
@@ -399,6 +406,7 @@ test "GameSettings handle failing allocation on folder modification" {
         .folder = "",
         .started = false,
         .allocator = failing_allocator.allocator(),
+        .context = .{ .round = 0 },
     };
     defer settings.deinit();
 

@@ -7,7 +7,7 @@ const game = @import("../game.zig");
 const MCTS = @import("../mcts.zig").MCTS;
 
 // Number of iteration for MCTS.
-const MAX_MCTS_ITERATIONS = 250000;
+const MAX_MCTS_ITERATIONS = 1000;
 
 // Error set
 pub const PlayError = error {
@@ -59,14 +59,14 @@ pub fn AIPlay() [2]u16 {
 
 pub fn AIPlayMCTS() ![2]u16 {
     // Initialize MCTS with RAVE.
-    var mcts = try MCTS.init(&game.gameSettings, board.game_board, &main.allocator);
+    var mcts = try MCTS.init(&game.gameSettings, board.game_board, main.allocator);
 
     // Perform MCTS search.
     try mcts.performMCTSSearch(MAX_MCTS_ITERATIONS);
 
     // Select the best move.
     const best_child = try mcts.selectBestChild();
-    const ai_move = best_child.coordinates orelse return error.NoValidMove;
+    const ai_move = best_child.coordinates;
     mcts.deinit();
     board.game_board.setCellByCoordinates(ai_move.x, ai_move.y, .own);
 
@@ -105,9 +105,9 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         return;
     };
 
-    const ai_move = AIPlay();
+    // const ai_move = AIPlay();
 
-    // const ai_move = try AIPlayMCTS();
+    const ai_move = try AIPlayMCTS();
 
     try message.sendMessageF("{d},{d}", .{ai_move[0], ai_move[1]}, writer);
 }
