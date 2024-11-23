@@ -8,7 +8,7 @@ var prng = std.Random.DefaultPrng.init(0);
 pub var random = prng.random();
 
 /// Width of dilations for heatmap.
-const MAX_DILATIONS = 4;
+const MAX_DILATIONS = 2;
 const DILATION_THRESHOLD = 1;
 
 /// # Structure representing the data of a cell.
@@ -27,7 +27,7 @@ const Zone = struct {
     importance: f32,
 };
 
-const HeatMap = struct {
+pub const HeatMap = struct {
     map: []CellData,
     height: u32,
     width: u32,
@@ -179,7 +179,7 @@ const HeatMap = struct {
     ///     - y: The coordinate on y-axis.
     /// - Returns:
     ///     - The index in the map array.
-    fn coordinatesToIndex(self: HeatMap, x: u32, y: u32) u32 {
+    pub fn coordinatesToIndex(self: HeatMap, x: u32, y: u32) u32 {
         return y * self.width + x;
     }
 
@@ -227,6 +227,21 @@ const HeatMap = struct {
             }
         }
         return count;
+    }
+
+    /// # Method used to obtain coordinates from index.
+    /// - Parameters:
+    ///     - self: The current board.
+    ///     - index: The index in the map array.
+    /// - Returns:
+    ///     - The coordinates in the map.
+    pub fn indexToCoordinates(self: HeatMap, index: u64) Coordinates {
+        const y: u32 = @as(u32, @intCast(index)) / self.width;
+        const x: u32 = @as(u32, @intCast(index)) % self.width;
+        return Coordinates {
+            .x = x,
+            .y = y,
+        };
     }
 
     /// Method used to obtain an array of coordinate chosen by random
@@ -282,6 +297,81 @@ const HeatMap = struct {
         }
 
         return array;
+    }
+
+    /// Method used to obtain a coordinate chosen by random
+    /// based on the heatmap values.
+    pub fn getRandomIndex(self: HeatMap)!u64 {
+        // Sum of weights.
+        const sum = self.getImportanceSum();
+
+        // Guard against zero or negative sums
+        if (sum <= 0) return 0;
+
+        // Pick a random float in [0; sum).
+        // Use sum - std.math.f32_min to ensure random_value < sum
+        const random_value = random.float(f32) * (sum - std.math.floatMin(f32));
+
+        // Obtain an index randomly.
+        var cursor: f32 = 0;
+        var index: u64 = 0;
+        for (self.map) |cell| {
+            cursor += cell.importance;
+            if (cursor > random_value) {
+                return index;
+            }
+            index += 1;
+        }
+
+        return 0;
+    }
+
+    pub fn getBestMovesArray(
+        self: HeatMap,
+        allocator: std.mem.Allocator
+    ) ![]Coordinates {
+        // Create an array containing important indexes.
+        var important_index_array = try allocator.alloc(
+            u64,
+            self.getNbOfImportantValues()
+        );
+        defer allocator.free(important_index_array);
+
+        var count: u32 = 0;
+        for (0..self.map.len, self.map)
+        |i, cell_data| {
+            if (cell_data.importance > 0) {
+                important_index_array[count] = i;
+                count += 1;
+            }
+        }
+
+        // Create context for sorting.
+        const Context = struct {
+            heatmap: HeatMap,
+
+            pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
+                return ctx.heatmap.map[a].importance > ctx.heatmap.map[b].importance;
+            }
+        };
+
+        const ctx = Context{ .heatmap = self };
+
+        // Sort indices based on importance values
+        std.sort.insertion(u64, important_index_array, ctx, Context
+        .lessThan);
+
+        // Convert into an array of coordinates.
+        var important_coordinates_array = try allocator.alloc(
+            Coordinates,
+            important_index_array.len
+        );
+        for (0..important_coordinates_array.len) |i| {
+            important_coordinates_array[i] =
+                self.indexToCoordinates(important_index_array[i]);
+        }
+
+        return important_coordinates_array;
     }
 
     /// # Method used to format the HeatMap into a string.
@@ -449,8 +539,10 @@ fn getMaxValueFromArray(array: []const f32) f32 {
 }
 
 fn getHiglightWidthHeight(size: u32) ?u32 {
-    if (size < 10) {
+    if (size < 5) {
         return null;
+    } else if (size >= 5 and size <= 10) {
+        return 5;
     } else if (size > 10 and size < 20) {
         return size / 2;
     }
@@ -597,8 +689,8 @@ pub fn bestActionHeatmap(
 
 test "getHiglightWidthHeight handles different sizes" {
     // Less than 10
-    try std.testing.expectEqual(getHiglightWidthHeight(5), null);
-    try std.testing.expectEqual(getHiglightWidthHeight(9), null);
+    try std.testing.expectEqual(getHiglightWidthHeight(5), 5);
+    try std.testing.expectEqual(getHiglightWidthHeight(9), 5);
 
     // Between 10 and 20
     try std.testing.expectEqual(getHiglightWidthHeight(12), 6);
@@ -635,17 +727,17 @@ test "getMaxHiglightZone calculates correct zones" {
         try std.testing.expectEqual(zone.?.end.y, 12);
     }
 
-    // Test case 3: Invalid board with width < 10
+    // Test case 3: Invalid board with width < 5
     {
-        var board = try Board.init(std.testing.allocator, 8, 30);
+        var board = try Board.init(std.testing.allocator, 4, 30);
         board.deinit(std.testing.allocator);
         const zone = getMaxHiglightZone(board);
         try std.testing.expectEqual(zone, null);
     }
 
-    // Test case 4: Invalid board with height < 10
+    // Test case 4: Invalid board with height < 5
     {
-        var board = try Board.init(std.testing.allocator, 30, 8);
+        var board = try Board.init(std.testing.allocator, 30, 3);
         board.deinit(std.testing.allocator);
         const zone = getMaxHiglightZone(board);
         try std.testing.expectEqual(zone, null);
@@ -688,19 +780,19 @@ test "HeatMap coordinatesToIndex" {
 
 test "getHiglightWidthHeight" {
     const testing = std.testing;
-    try testing.expectEqual(getHiglightWidthHeight(5), null);
+    try testing.expectEqual(getHiglightWidthHeight(5), 5);
     try testing.expectEqual(getHiglightWidthHeight(15), 7);
     try testing.expectEqual(getHiglightWidthHeight(25), 10);
 }
 
 test "getMaxHiglightZone" {
     const testing = std.testing;
-    var board1 = try Board.init(std.testing.allocator, 5, 5);
-    board1.deinit(std.testing.allocator);
+    var board1 = try Board.init(std.testing.allocator, 4, 5);
+    defer board1.deinit(std.testing.allocator);
     try testing.expectEqual(getMaxHiglightZone(board1), null);
 
     var board2 = try Board.init(std.testing.allocator, 15, 15);
-    board2.deinit(std.testing.allocator);
+    defer board2.deinit(std.testing.allocator);
     const zone2 = getMaxHiglightZone(board2).?;
     try testing.expectEqual(zone2.start.x, 4);
     try testing.expectEqual(zone2.start.y, 4);
@@ -708,7 +800,7 @@ test "getMaxHiglightZone" {
     try testing.expectEqual(zone2.end.y, 11);
 
     var board3 = try Board.init(std.testing.allocator, 25, 25);
-    board3.deinit(std.testing.allocator);
+    defer board3.deinit(std.testing.allocator);
     const zone3 = getMaxHiglightZone(board3).?;
     try testing.expectEqual(zone3.start.x, 7);
     try testing.expectEqual(zone3.start.y, 7);
