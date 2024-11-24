@@ -5,6 +5,7 @@ const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
 const io = @import("io.zig");
 const build_options = @import("build_options");
+const zobrist = @import("zobrist.zig");
 
 const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
@@ -85,6 +86,13 @@ pub fn main() !void {
         height, width
     ) catch |err| { return err; };
     defer board.game_board.deinit(allocator);
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        20,
+        random,
+        allocator
+    );
+    defer zobrist.ztable.deinit(allocator);
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 
