@@ -1,6 +1,6 @@
 const testing = @import("std").testing;
 
-// Mendatory commands.
+// Mandatory commands.
 pub const about = @import("about.zig");
 pub const begin = @import("begin.zig");
 pub const board = @import("board.zig");

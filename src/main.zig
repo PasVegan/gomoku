@@ -34,7 +34,7 @@ const CommandMapping = struct {
 
 /// Map of pointer on function.
 const commandMappings: []const CommandMapping = &[_]CommandMapping{
-    // Mendatory commands.
+    // Mandatory commands.
     .{ .cmd = "ABOUT", .func = cmd.about.handle },
     .{ .cmd = "START", .func = cmd.start.handle },
     .{ .cmd = "END", .func = cmd.end.handle },
