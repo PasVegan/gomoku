@@ -1,6 +1,7 @@
 const std = @import("std");
 const board = @import("board.zig");
 const main = @import("main.zig");
+const ai = @import("ai.zig");
 
 pub var ztable: ZobristTable = undefined;
 
@@ -18,13 +19,13 @@ pub const ZobristTable = struct {
     pub const Entry = struct {
         key: Key,
         depth: u8,
-        score: i32,
-        flag: Flag,
+        threat: ai.Threat,
     };
 
     // Member variables
     size: u32,
     transposition_table: []?Entry,
+    heuristics_table: []?i32,
     zobrist_table: [2][20][20]Key,
     current_hash: Key,
 
@@ -33,10 +34,12 @@ pub const ZobristTable = struct {
         var self = ZobristTable{
             .size = board_size,
             .transposition_table = try allocator.alloc(?Entry, TableSize),
+            .heuristics_table = try allocator.alloc(?i32, TableSize),
             .zobrist_table = undefined,
             .current_hash = 0,
         };
         @memset(self.transposition_table, null);
+        @memset(self.heuristics_table, null);
 
         // Initialize random values for each position and piece
         for (0..2) |piece| {
@@ -52,6 +55,7 @@ pub const ZobristTable = struct {
 
     pub fn deinit(self: *ZobristTable, allocator: std.mem.Allocator) void {
         allocator.free(self.transposition_table);
+        allocator.free(self.heuristics_table);
     }
 
     // Calculate initial hash for a given board position
@@ -80,36 +84,50 @@ pub const ZobristTable = struct {
         }
     }
 
+    pub fn storeHeuristic(self: *ZobristTable, score: i32) void {
+        const index = self.current_hash % TableSize;
+        self.heuristics_table[index] = score;
+    }
+
     // Store position in transposition table
-    pub fn storePosition(self: *ZobristTable, depth: u8, score: i32, flag: Flag) void {
+    pub fn storePosition(self: *ZobristTable, depth: u8, move: ai.Threat) void {
         const index = self.current_hash % TableSize;
         self.transposition_table[index] = Entry{
             .key = self.current_hash,
             .depth = depth,
-            .score = score,
-            .flag = flag,
+            .threat = move,
         };
     }
 
+    pub fn lookupHeuristic(self: *ZobristTable) ?i32 {
+        const index = self.current_hash % TableSize;
+        const entry = self.heuristics_table[index];
+
+        if (entry) |e| {
+            return e;
+        }
+        return null;
+    }
+
     // Lookup position in transposition table
-    pub fn lookupPosition(self: *ZobristTable, depth: u8, alpha: i32, beta: i32) ?i32 {
+    pub fn lookupPosition(self: *ZobristTable, depth: u8) ?ai.Threat {
         const index = self.current_hash % TableSize;
         const entry = self.transposition_table[index];
 
         if (entry) |e| {
-            if (e.key == self.current_hash and e.depth >= depth) {
-                switch (e.flag) {
-                    .EXACT => return e.score,
-                    .LOWERBOUND => {
-                        if (e.score >= beta) return beta;
-                    },
-                    .UPPERBOUND => {
-                        if (e.score <= alpha) return alpha;
-                    },
-                }
+            if (e.depth >= depth) {
+                // switch (e.flag) {
+                //     .EXACT => return e.score,
+                //     .LOWERBOUND => {
+                //         if (e.score >= beta) return beta;
+                //     },
+                //     .UPPERBOUND => {
+                //         if (e.score <= alpha) return alpha;
+                //     },
+                // }
+                return e.threat;
             }
         }
-
         return null;
     }
 
