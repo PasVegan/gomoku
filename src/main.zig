@@ -5,6 +5,7 @@ const game = @import("game.zig");
 const cmd = @import("commands/cmd.zig");
 const io = @import("io.zig");
 const build_options = @import("build_options");
+const zobrist = @import("zobrist.zig");
 
 const test_allocator = std.testing.allocator;
 const stdin = std.io.getStdIn().reader();
@@ -34,6 +35,7 @@ const CommandMapping = struct {
 
 /// Map of pointer on function.
 const commandMappings: []const CommandMapping = &[_]CommandMapping{
+    // Mandatory commands.
     .{ .cmd = "ABOUT", .func = cmd.about.handle },
     .{ .cmd = "START", .func = cmd.start.handle },
     .{ .cmd = "END", .func = cmd.end.handle },
@@ -41,6 +43,10 @@ const commandMappings: []const CommandMapping = &[_]CommandMapping{
     .{ .cmd = "BEGIN", .func = cmd.begin.handle },
     .{ .cmd = "TURN", .func = cmd.turn.handle },
     .{ .cmd = "BOARD", .func = cmd.board.handle },
+    // Optional commands.
+    .{ .cmd = "RECSTART", .func = cmd.recstart.handle },
+    .{ .cmd = "RESTART", .func = cmd.restart.handle },
+    .{ .cmd = "TAKEBACK", .func = cmd.takeback.handle },
 };
 
 /// Function used to handle commands.
@@ -80,6 +86,13 @@ pub fn main() !void {
         height, width
     ) catch |err| { return err; };
     defer board.game_board.deinit(allocator);
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        20,
+        random,
+        allocator
+    );
+    defer zobrist.ztable.deinit(allocator);
 
     var read_buffer = try std.BoundedArray(u8, 256).init(0);
 

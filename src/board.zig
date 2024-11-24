@@ -50,6 +50,12 @@ pub const Board = struct {
         };
     }
 
+    /// # Method used to reset a board.
+    pub fn reset(self: *Board) void {
+        // Initialize the map to zero bytes.
+        @memset(self.map, Cell.empty);
+    }
+
     /// # Method used to free a board.
     /// - Parameters:
     ///     - map_allocator: The allocator used to initialize the map.

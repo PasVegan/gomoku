@@ -5,6 +5,7 @@ const main = @import("../main.zig");
 const ai = @import("../ai.zig");
 const game = @import("../game.zig");
 const MCTS = @import("../mcts.zig").MCTS;
+const zobrist = @import("../zobrist.zig");
 
 // Number of iteration for MCTS.
 const MAX_MCTS_ITERATIONS = 250000;
@@ -13,6 +14,32 @@ const MAX_MCTS_ITERATIONS = 250000;
 pub const PlayError = error {
     OUTSIDE,
     OCCUPIED,
+};
+
+const AIMapping = *const fn () ai.Threat;
+
+const AIMap: []const AIMapping = &[_]AIMapping{
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    ai.getBotMove5,
+    ai.getBotMove6,
+    ai.getBotMove7,
+    ai.getBotMove8,
+    ai.getBotMove9,
+    ai.getBotMove10,
+    ai.getBotMove11,
+    ai.getBotMove12,
+    ai.getBotMove13,
+    ai.getBotMove14,
+    ai.getBotMove15,
+    ai.getBotMove16,
+    ai.getBotMove17,
+    ai.getBotMove18,
+    ai.getBotMove19,
+    ai.getBotMove20,
 };
 
 pub fn setEnnemyStone(x: u32, y: u32) PlayError!void {
@@ -26,7 +53,7 @@ pub fn setEnnemyStone(x: u32, y: u32) PlayError!void {
 }
 
 pub fn AIPlay() [2]u16 {
-    const empty_cell = ai.findBestMove(&board.game_board);
+    const empty_cell = @call(.auto, AIMap[board.game_board.width], .{});
     board.game_board.setCellByCoordinates(empty_cell.col, empty_cell.row, board.Cell.own);
     return .{empty_cell.col, empty_cell.row};
 }
@@ -101,6 +128,13 @@ test "handleTurn command valid input" {
         break :blk seed;
     });
     main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     try handle("TURN 0,0", list.writer().any());
     // Check if we received the coordinates
@@ -251,6 +285,13 @@ test "handleTurn command cell already taken" {
         break :blk seed;
     });
     main.random = real_prng.random();
+
+    zobrist.ztable = try zobrist.ZobristTable.init(
+        5,
+        main.random,
+        std.testing.allocator
+    );
+    defer zobrist.ztable.deinit(std.testing.allocator);
 
     // First place a stone
     try handle("TURN 0,0", list.writer().any());
