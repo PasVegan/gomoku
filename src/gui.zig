@@ -21,6 +21,11 @@ var current_theme = Theme{
     .winning_line_color = .{ 1.0, 0.0, 0.0 },
 };
 
+// Add player color choice
+var player_plays_white: bool = true;
+var color_chosen = false;
+var dialog: capy.Window = undefined;
+
 const themes = struct {
     const classic = Theme{
         .background_color = .{ 0.862745098039, 0.701960784314, 0.360784313725 },
@@ -117,11 +122,61 @@ pub fn run_gui() !void {
 
     window.setTitle("Zomoku");
     window.setPreferredSize(500, 500);
+
+    // Create and show color choice dialog
+    try showColorChoiceDialog();
+
     window.show();
     capy.runEventLoop();
 }
 
+fn showColorChoiceDialog() !void {
+    dialog = try capy.Window.init();
+    try dialog.set(
+        capy.column(.{ .spacing = 20 }, .{
+            capy.label(.{ .text = "Choose your stone color:" }),
+            capy.row(.{ .spacing = 10 }, .{
+                capy.button(.{
+                    .label = "Play as White",
+                    .onclick = selectWhiteAndClose
+                }),
+                capy.button(.{
+                    .label = "Play as Black",
+                    .onclick = selectBlackAndClose
+                }),
+            }),
+        }),
+    );
+
+    dialog.setTitle("Color Selection");
+    dialog.setPreferredSize(250, 150);
+    dialog.show();
+}
+
+fn selectWhiteAndClose(_: *anyopaque) !void {
+    player_plays_white = true;
+    color_chosen = true;
+    dialog.close();
+    try canva.requestDraw();
+}
+
+fn selectBlackAndClose(_: *anyopaque) !void {
+    player_plays_white = false;
+    color_chosen = true;
+    dialog.close();
+
+    // AI plays first move when player chooses black
+    const ai_move = turn.AIPlay();
+    std.debug.print("AI played on cell ({d}, {d})\n", .{ai_move[0], ai_move[1]});
+    if (try board.game_board.addWinningLine(ai_move[0], ai_move[1]))
+        game_won = true;
+    try canva.requestDraw();
+}
+
+
 fn onCellClicked(widget: *capy.Canvas, button: capy.MouseButton, pressed: bool, x: i32, y: i32) !void {
+    if (!color_chosen) return;
+
     if (button == .Left and pressed and !game_won) {
         // Calculate which cell was clicked
         const relative_x = x - grid_info.start_x;
@@ -185,6 +240,8 @@ fn setNatureTheme(_: *anyopaque) !void {
 fn resetButton(_: *anyopaque) !void {
     try start.handle(start_command, std.io.getStdOut().writer().any());
     game_won = false;
+    color_chosen = false;
+    try showColorChoiceDialog();
     try canva.requestDraw();
 }
 
@@ -252,16 +309,36 @@ fn onDraw(widget: *capy.Canvas, ctx: *capy.DrawContext) !void {
 
                 // Set color based on cell type
                 switch (cell) {
-                    .opponent => ctx.setColor(
-                        current_theme.opponent_stone_color[0],
-                        current_theme.opponent_stone_color[1],
-                        current_theme.opponent_stone_color[2],
-                    ),
-                    .own => ctx.setColor(
-                        current_theme.own_stone_color[0],
-                        current_theme.own_stone_color[1],
-                        current_theme.own_stone_color[2],
-                    ),
+                    .opponent => {
+                        if (player_plays_white) {
+                            ctx.setColor(
+                                current_theme.own_stone_color[0],
+                                current_theme.own_stone_color[1],
+                                current_theme.own_stone_color[2],
+                            );
+                        } else {
+                            ctx.setColor(
+                                current_theme.opponent_stone_color[0],
+                                current_theme.opponent_stone_color[1],
+                                current_theme.opponent_stone_color[2],
+                            );
+                        }
+                    },
+                    .own => {
+                        if (player_plays_white) {
+                            ctx.setColor(
+                                current_theme.opponent_stone_color[0],
+                                current_theme.opponent_stone_color[1],
+                                current_theme.opponent_stone_color[2],
+                            );
+                        } else {
+                            ctx.setColor(
+                                current_theme.own_stone_color[0],
+                                current_theme.own_stone_color[1],
+                                current_theme.own_stone_color[2],
+                            );
+                        }
+                    },
                     .winning_line_or_forbidden => ctx.setColor(
                         current_theme.winning_line_color[0],
                         current_theme.winning_line_color[1],
