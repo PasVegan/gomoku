@@ -7,7 +7,7 @@ const game = @import("../game.zig");
 const MCTS = @import("../mcts.zig").MCTS;
 
 // Number of iteration for MCTS.
-const MAX_MCTS_ITERATIONS = 1000;
+const MAX_MCTS_ITERATIONS = 10000;
 
 // Error set
 pub const PlayError = error {
@@ -105,9 +105,9 @@ pub fn handle(msg: []const u8, writer: std.io.AnyWriter) !void {
         return;
     };
 
-    // const ai_move = AIPlay();
+    const ai_move = AIPlay();
 
-    const ai_move = try AIPlayMCTS();
+    // const ai_move = try AIPlayMCTS();
 
     try message.sendMessageF("{d},{d}", .{ai_move[0], ai_move[1]}, writer);
 }

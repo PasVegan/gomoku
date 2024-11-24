@@ -33,7 +33,7 @@ pub const Node = struct {
     children: std.ArrayList(*Node),
 
     statistics: Statistics,
-    board: Board,
+    reshaped_heatmap: heatmap.ReshapedHeatmap,
     game: *GameSettings,
     untried_moves: []Coordinates,
     untried_moves_index: u32,
@@ -42,7 +42,7 @@ pub const Node = struct {
     // Method used to initialize the Node.
     pub fn init(
         game: *GameSettings,
-        board: Board,
+        reshaped_heatmap: heatmap.ReshapedHeatmap,
         parent: ?*Node,
         coordinates: Coordinates,
         untried_moves: []Coordinates,
@@ -57,7 +57,7 @@ pub const Node = struct {
         @memcpy(new_untried_moves, untried_moves[0..untried_moves_index]);
         node.* = Node{
             .game = game,
-            .board = try board.clone(allocator),
+            .reshaped_heatmap = try reshaped_heatmap.clone(allocator),
             .parent = parent,
             .children = std.ArrayList(*Node).init(allocator),
             .untried_moves = new_untried_moves,
@@ -76,13 +76,15 @@ pub const Node = struct {
         for (self.children.items) |child| {
             child.deinit(allocator);
         }
-        self.board.deinit(allocator);
+        self.reshaped_heatmap.heatmap.deinit(allocator);
         self.children.deinit();
         allocator.free(self.untried_moves);
         allocator.destroy(self);
     }
 
     pub fn getUCBScore(self: *Node, allocator: std.mem.Allocator) ?f64 {
+        _ = allocator;
+
         // Unexplored nodes have maximum values so we favour exploration.
         if (self.statistics.visit_count == 0)
             return std.math.floatMax(f64);
@@ -96,46 +98,48 @@ pub const Node = struct {
             @log(top_node.statistics.visit_count) / self.statistics.visit_count
         );
 
-        // Strategic position evaluation
-        var position_bonus: f64 = 0;
+        // Todo: Strategic position evaluation for heatmap.
 
-        // Actual coordinates.
-        const coords = self.coordinates;
+        // // Strategic position evaluation
+        // var position_bonus: f64 = 0;
+        //
+        // // Actual coordinates.
+        // const coords = self.coordinates;
+        //
+        // // Center proximity bonus (encourages playing near the center)
+        // const center_x = @as(f64, @floatFromInt(self.board.width)) / 2;
+        // const center_y = @as(f64, @floatFromInt(self.board.height)) / 2;
+        // const dist_x = @abs(@as(f64, @floatFromInt(coords.x)) - center_x);
+        // const dist_y = @abs(@as(f64, @floatFromInt(coords.y)) - center_y);
+        // const center_distance = @sqrt(dist_x * dist_x + dist_y * dist_y);
+        // const max_distance = @sqrt(
+        //     center_x * center_x + center_y * center_y
+        // );
+        // position_bonus += 0.2 * (1 - center_distance / max_distance);
+        //
+        // // Pattern recognition bonus
+        // position_bonus += evaluatePosition(self.board, coords);
+        //
+        // // Defensive and offensive bonuses
+        // var test_board = self.board.clone(allocator) catch return null;
+        // defer test_board.deinit(allocator);
+        //
+        // // Check defensive value
+        // test_board.setCellByCoordinates(coords.x, coords.y, .opponent);
+        // if (test_board.isWin(coords.x, coords.y)) {
+        //     position_bonus += 0.3;
+        // }
+        //
+        // // Undo.
+        // test_board.setCellByCoordinates(coords.x, coords.y, .empty);
+        //
+        // // Check offensive value
+        // test_board.setCellByCoordinates(coords.x, coords.y, .own);
+        // if (test_board.isWin(coords.x, coords.y)) {
+        //     position_bonus += 0.25;
+        // }
 
-        // Center proximity bonus (encourages playing near the center)
-        const center_x = @as(f64, @floatFromInt(self.board.width)) / 2;
-        const center_y = @as(f64, @floatFromInt(self.board.height)) / 2;
-        const dist_x = @abs(@as(f64, @floatFromInt(coords.x)) - center_x);
-        const dist_y = @abs(@as(f64, @floatFromInt(coords.y)) - center_y);
-        const center_distance = @sqrt(dist_x * dist_x + dist_y * dist_y);
-        const max_distance = @sqrt(
-            center_x * center_x + center_y * center_y
-        );
-        position_bonus += 0.2 * (1 - center_distance / max_distance);
-
-        // Pattern recognition bonus
-        position_bonus += evaluatePosition(self.board, coords);
-
-        // Defensive and offensive bonuses
-        var test_board = self.board.clone(allocator) catch return null;
-        defer test_board.deinit(allocator);
-
-        // Check defensive value
-        test_board.setCellByCoordinates(coords.x, coords.y, .opponent);
-        if (test_board.isWin(coords.x, coords.y)) {
-            position_bonus += 0.3;
-        }
-
-        // Undo.
-        test_board.setCellByCoordinates(coords.x, coords.y, .empty);
-
-        // Check offensive value
-        test_board.setCellByCoordinates(coords.x, coords.y, .own);
-        if (test_board.isWin(coords.x, coords.y)) {
-            position_bonus += 0.25;
-        }
-
-        return exploitation + exploration + position_bonus;
+        return exploitation + exploration;
     }
 
     fn evaluatePosition(board: Board, coords: Coordinates) f64 {
@@ -182,9 +186,12 @@ pub const Node = struct {
             // Award bonus based on patterns
             if (consecutive >= 2) {
                 if (space_before and space_after) {
-                    bonus += 0.1 * @as(f64, @floatFromInt(consecutive)); // Open ends
+                    // Open ends
+                    bonus += 0.1 * @as(f64, @floatFromInt(consecutive));
+
                 } else if (space_before or space_after) {
-                    bonus += 0.05 * @as(f64, @floatFromInt(consecutive)); // One open end
+                    // One open end
+                    bonus += 0.05 * @as(f64, @floatFromInt(consecutive));
                 }
             }
         }
@@ -206,13 +213,16 @@ pub const Node = struct {
         // Get the coordinates for expansion.
         const child_coordinates = self.untried_moves[0];
 
-        // Clone the board and apply the move.
-        var new_board = try self.board.clone(allocator);
-        defer new_board.deinit(allocator);
-        new_board.setCellByCoordinates(
-            child_coordinates.x,
-            child_coordinates.y,
-            .own
+        // Clone the heatmap and apply the move.
+        var new_heatmap = try self.reshaped_heatmap.clone(allocator);
+        defer new_heatmap.heatmap.deinit(allocator);
+        try new_heatmap.setCell(
+            child_coordinates,
+            heatmap.CellData {
+                .cell = .own,
+                .importance = 0,
+            },
+            allocator
         );
 
         // Remove the move from untried moves.
@@ -224,7 +234,7 @@ pub const Node = struct {
         // Create a new child node.
         const new_node = try Node.init(
             self.game,
-            new_board,
+            new_heatmap,
             self,
             child_coordinates,
             self.untried_moves,
@@ -235,42 +245,31 @@ pub const Node = struct {
     }
 
     pub fn simulate(self: Node, allocator: std.mem.Allocator) !i32 {
-        // Obtain a temporary board from our current board state.
-        var temporary_board = try self.board.clone(allocator);
-        defer temporary_board.deinit(allocator);
+        // Obtain a temporary heatmap from our current heatmap state.
+        var temporary_heatmap = try self.reshaped_heatmap.clone(allocator);
+        defer temporary_heatmap.heatmap.deinit(allocator);
 
         var current_coordinates = self.coordinates;
         var current_player = Cell.own;
 
-        // Arena allocator for MCTS operations
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
         while (
-            !temporary_board.isWin(current_coordinates.x, current_coordinates.y)
-                and !temporary_board.isFull()
+            !temporary_heatmap.isWin(current_coordinates.x, current_coordinates.y)
+                and !temporary_heatmap.isFull()
         ) {
-            // Reset arena for this turn
-            _ = arena.reset(.retain_capacity);
-            const arena_allocator = arena.allocator();
-
-            // Obtain a heatmap of important regions.
-            var game_heatmap = try heatmap.bestActionHeatmap(
-                temporary_board,
-                self.game.context,
-                arena_allocator
-            );
 
             // Get valid, random cell (weighted random).
-            const cell_index = try game_heatmap.?.getRandomIndex();
+            const cell_index = try temporary_heatmap.getRandomIndex();
             current_coordinates =
-                game_heatmap.?.indexToCoordinates(cell_index);
+                temporary_heatmap.indexToOriginalCoordinates(cell_index);
 
-            // Set the cell on the board.
-            temporary_board.setCellByCoordinates(
-                current_coordinates.x,
-                current_coordinates.y,
-                current_player
+            // Update the heatmap.
+            try temporary_heatmap.setCell(
+                current_coordinates,
+                heatmap.CellData {
+                    .cell = current_player,
+                    .importance = 0,
+                },
+                allocator
             );
 
             // Set the turn to the other player.
@@ -279,7 +278,7 @@ pub const Node = struct {
         }
 
         // Returns 1 on win, -1 on failure, 0 on draw.
-        if (temporary_board.isWin(current_coordinates.x, current_coordinates.y)) {
+        if (temporary_heatmap.isWin(current_coordinates.x, current_coordinates.y)) {
             const winner = if (current_player == Cell.own)
                 Cell.opponent else Cell.own;
             return if (winner == Cell.own) 1 else -1;
@@ -311,7 +310,7 @@ fn popElementFromCoordinateSlice(
 pub const MCTS = struct {
     allocator: std.mem.Allocator,
     root: *Node,
-    heatmap: heatmap.HeatMap,
+    reshaped_heatmap: heatmap.ReshapedHeatmap,
 
     pub fn init(
         game: *GameSettings,
@@ -319,24 +318,16 @@ pub const MCTS = struct {
         allocator: std.mem.Allocator
     ) !MCTS {
         // Obtain a heatmap of important regions.
-        var game_heatmap = try heatmap.bestActionHeatmap(
-            board,
-            game.context,
-            allocator
-        );
-
-        // Create an array containing important indexes.
+        var game_heatmap_reshaped = try heatmap.bestActionPaddedHeatmap(board, game.context, allocator);
         const important_coordinates_array =
-            try game_heatmap.?.getBestMovesArray(allocator);
+            try game_heatmap_reshaped.getBestMovesArray(allocator);
         defer allocator.free(important_coordinates_array);
-
-        // std.debug.print("{}", .{game_heatmap.?});
 
         return MCTS{
             .allocator = allocator,
             .root = try Node.init(
                 game,
-                board,
+                game_heatmap_reshaped,
                 null,
                 important_coordinates_array[0],
                 important_coordinates_array
@@ -344,13 +335,13 @@ pub const MCTS = struct {
                 @as(u32, @intCast(important_coordinates_array.len - 1)),
                 allocator
             ),
-            .heatmap = game_heatmap.?,
+            .reshaped_heatmap = game_heatmap_reshaped,
         };
     }
 
     pub fn deinit(self: *MCTS) void {
         self.root.deinit(self.allocator);
-        self.heatmap.deinit(self.allocator);
+        self.reshaped_heatmap.heatmap.deinit(self.allocator);
     }
 
     pub fn selectBestChild(self: *MCTS) !*Node {
@@ -387,9 +378,10 @@ pub const MCTS = struct {
                 for (current.children.items) |child| {
                     var score = child.getUCBScore(self.allocator) orelse
                         continue;
-                    const cell_data_index = self.heatmap.coordinatesToIndex
-                        (child.coordinates.x, child.coordinates.y);
-                    score *= self.heatmap.map[cell_data_index].importance;
+                    const cell_data_index =
+                        self.reshaped_heatmap.originalCoordinatesToPaddedIndex
+                            (child.coordinates);
+                    score *= self.reshaped_heatmap.heatmap.map[cell_data_index].importance;
                     if (score > best_score) {
                         best_score = score;
                         best_child = child;
@@ -462,11 +454,16 @@ test "Node expansion" {
     var board = try Board.init(allocator, 3, 3);
     defer board.deinit(std.testing.allocator);
 
+    var game_heatmap_reshaped = try heatmap.bestActionPaddedHeatmap(board,
+        game_settings
+    .context, allocator);
+    defer game_heatmap_reshaped.heatmap.deinit(allocator);
+
     var untried_moves: [1]Coordinates = [1]Coordinates{
         .{ .x = 0, .y = 0 },
     };
 
-    var node = try Node.init(&game_settings, board, null,
+    var node = try Node.init(&game_settings, game_heatmap_reshaped, null,
         Coordinates{.x = 0, .y = 0}, &untried_moves, 1, allocator);
     defer node.deinit(allocator);
 
@@ -532,11 +529,16 @@ test "Simulation and backpropagation" {
     var board = try Board.init(allocator, 3, 3);
     defer board.deinit(std.testing.allocator);
 
+    var game_heatmap_reshaped = try heatmap.bestActionPaddedHeatmap(board,
+        game_settings
+        .context, allocator);
+    defer game_heatmap_reshaped.heatmap.deinit(allocator);
+
     var untried_moves: [1]Coordinates = [1]Coordinates{
         .{ .x = 0, .y = 0 },
     };
 
-    var node = try Node.init(&game_settings, board, null, Coordinates{ .x =
+    var node = try Node.init(&game_settings, game_heatmap_reshaped, null, Coordinates{ .x =
     1, .y = 1 }, &untried_moves, 1, allocator);
     defer node.deinit(allocator);
 
