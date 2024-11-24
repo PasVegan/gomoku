@@ -44,6 +44,7 @@ const commandMappings: []const CommandMapping = &[_]CommandMapping{
     .{ .cmd = "BOARD", .func = cmd.board.handle },
     // Optional commands.
     .{ .cmd = "RECSTART", .func = cmd.recstart.handle },
+    .{ .cmd = "RESTART", .func = cmd.restart.handle },
 };
 
 /// Function used to handle commands.
